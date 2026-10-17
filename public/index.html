@@ -133,6 +133,8 @@ th:first-child,td:first-child{padding-left:18px} th:last-child,td:last-child{pad
 .cfgm{align-items:flex-start;overflow-y:auto}
 .cfgbox{width:100%;max-width:520px;padding:20px;display:flex;flex-direction:column;gap:10px;margin-top:6vh}
 .n-ok{background:var(--greenBg);color:var(--greenTx)}
+#vAdmin.ro .ed{display:none!important}
+.robar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--blueBg);color:var(--blueTx);border-radius:12px;padding:12px 16px;margin-bottom:16px;font-size:14px}
 .pinm{position:fixed;inset:0;background:var(--ground);z-index:55;overflow-y:auto;padding:calc(16px + env(safe-area-inset-top,0px)) 16px 24px}
 .pinbox{max-width:380px;margin:0 auto;display:flex;flex-direction:column;align-items:stretch;gap:18px}
 .pinhead{display:flex;align-items:center;gap:12px}
@@ -325,10 +327,11 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
       <input id="aDate" type="date" class="sm" onchange="renderAdmin()">
       <button class="sm" onclick="exportXlsx()">ส่งออก Excel (เดือนนี้ + งานซ่อม)</button>
       <button class="sm amb" onclick="copyMissing()">คัดลอกข้อความเตือนคนยังไม่ส่ง</button>
-      <button class="sm" id="logoutBtn" onclick="adminLogout()">ออกจากแอดมิน</button>
+      <button class="sm" id="logoutBtn" onclick="adminLogout()">ล็อกการแก้ไข</button>
     </div>
   </div>
 
+  <div id="roBar" class="robar" hidden><span><b>โหมดดูอย่างเดียว</b> · ดูข้อมูลได้ทุกอย่าง ถ้าจะเพิ่ม/แก้รถ หรือเปลี่ยนสถานะซ่อม ต้องใส่รหัส</span><button class="sm dark" onclick="openAdminLogin()">ปลดล็อกการแก้ไข</button></div>
   <div class="kpis">
     <div class="card kpi"><span class="s">ส่งแล้ว</span><span class="v" id="kSent"></span><div class="bar"><i id="kSentBar"></i></div></div>
     <div class="card kpi"><span class="s">ระยะทางรวมวันนี้</span><span class="v" id="kKm"></span><span class="s" id="kKmS"></span></div>
@@ -379,10 +382,10 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
     <div class="chead"><h2>งานซ่อม</h2>
       <div class="tools">
         <div class="tabs" id="rTabs"><button data-t="open" class="on">ยังไม่เสร็จ</button><button data-t="all">ทั้งหมด</button></div>
-        <button class="sm amb" onclick="toggleNewRep()">+ เปิดงานซ่อม</button>
+        <button class="sm amb ed" onclick="toggleNewRep()">+ เปิดงานซ่อม</button>
       </div>
     </div>
-    <div id="newRep" class="newrep" hidden>
+    <div id="newRep" class="newrep ed" hidden>
       <div><label class="lab" for="nrCar">รถ</label><select id="nrCar"></select></div>
       <div style="flex:2 1 220px"><label class="lab" for="nrIssue">อาการ / งานที่ต้องซ่อม</label><input id="nrIssue" placeholder="เช่น เบรกมีเสียงดัง"></div>
       <div><label class="lab" for="nrShop">อู่</label><input id="nrShop" placeholder="เช่น อู่ช่างชัย"></div>
@@ -396,7 +399,7 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
   </div>
 
   <div class="card" style="margin-top:20px">
-    <div class="chead"><h2>ทะเบียนรถ</h2><div class="tools"><button class="sm" onclick="addCar()">+ เพิ่มรถ</button><button class="sm dark" onclick="saveCars()">บันทึกรายการรถ</button></div></div>
+    <div class="chead"><h2>ทะเบียนรถ</h2><div class="tools"><button class="sm ed" onclick="addCar()">+ เพิ่มรถ</button><button class="sm dark ed" onclick="saveCars()">บันทึกรายการรถ</button></div></div>
     <div class="tbl"><table class="carlist">
       <thead><tr><th>ทะเบียน</th><th>จังหวัด</th><th>รุ่น</th><th>คนขับประจำ</th><th>ความจุถัง (ล.)</th><th>ถ่ายน้ำมันเครื่องครั้งถัดไป (กม.)</th><th>ภาษีหมด</th><th>พ.ร.บ. หมด</th><th>สถานะรถ (ตามงานซ่อม)</th><th></th></tr></thead>
       <tbody id="carRows"></tbody>
@@ -412,7 +415,7 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
 <div id="pinModal" class="pinm" hidden>
   <div class="pinbox" role="dialog" aria-labelledby="pinTitle">
     <div class="pinhead"><button class="pinback" onclick="closePin()" aria-label="กลับ"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
-      <div><div class="disp" style="font-size:20px">หน้าแอดมิน</div><div style="font-size:13px;color:var(--mute)">สำหรับหัวหน้าฝ่ายยานพาหนะ</div></div></div>
+      <div><div class="disp" style="font-size:20px">ปลดล็อกการแก้ไข</div><div style="font-size:13px;color:var(--mute)">เพิ่ม/แก้รถ และเปลี่ยนสถานะซ่อม</div></div></div>
     <div class="lock"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg></div>
     <div style="text-align:center"><div class="disp" id="pinTitle" style="font-size:20px">ใส่รหัสผู้ดูแล</div><div id="pinSub" style="font-size:13px;color:var(--mute)">รหัสตัวเลข 8 หลัก</div></div>
     <div id="pinDots" class="pindots" aria-live="polite"></div>
@@ -538,7 +541,6 @@ function flags(r){
 /* ---------- role ---------- */
 var ROLE='driver';
 function setRole(r){
-  if(r==='admin'&&cloud()&&CLOUD_ROLE!=='admin'){openAdminLogin();return;}
   ROLE=r;
   document.getElementById('rDriver').classList.toggle('on',r==='driver');
   document.getElementById('rAdmin').classList.toggle('on',r==='admin');
@@ -817,7 +819,10 @@ function otherCar(){goHome();}
 var TAB='all';
 document.getElementById('tabs').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;TAB=b.dataset.t;Array.prototype.forEach.call(this.children,function(x){x.classList.toggle('on',x===b);});renderAdmin();});
 function renderAdmin(){
-  document.getElementById('logoutBtn').hidden=!cloud();
+  var ro=cloud()&&CLOUD_ROLE!=='admin';
+  document.getElementById('vAdmin').classList.toggle('ro',ro);
+  document.getElementById('roBar').hidden=!ro;
+  document.getElementById('logoutBtn').hidden=!(cloud()&&CLOUD_ROLE==='admin');
   var dEl=document.getElementById('aDate'); if(!dEl.value)dEl.value=ymd();
   var d=dEl.value;
   if(cloud()&&d&&!LOADED[d.slice(0,7)]&&!PULLING)pull(d.slice(0,7));
@@ -874,6 +879,7 @@ function renderAdmin(){
   renderCars();
   renderHistAdmin();
   renderRepairsAdmin();
+  if(ro)document.querySelectorAll('#carRows input,#repRows input,#repRows select').forEach(function(el){el.disabled=true;});
 }
 var RTAB='open';
 document.getElementById('rTabs').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;RTAB=b.dataset.t;Array.prototype.forEach.call(this.children,function(x){x.classList.toggle('on',x===b);});renderRepairsAdmin();});
@@ -938,7 +944,7 @@ function renderCars(force){
     function f(k,type,ph){return '<td><input data-i="'+i+'" data-k="'+k+'" type="'+(type||'text')+'" value="'+esc(c[k]||'')+'" placeholder="'+(ph||'')+'"></td>';}
     return '<tr>'+f('plate','text','กข 1234')+f('prov')+f('model')+f('driver')+f('tank','number','60')+f('nextOil','number')+f('taxExp','date')+f('actExp','date')+
       '<td>'+rsBadge(carState(c))+'</td>'+
-      '<td><button class="sm" onclick="delCar('+i+')" aria-label="ลบรถ">ลบ</button></td></tr>';
+      '<td><button class="sm ed" onclick="delCar('+i+')" aria-label="ลบรถ">ลบ</button></td></tr>';
   }).join('');
 }
 function readCars(){
@@ -1101,7 +1107,7 @@ async function checkPin(){
     var j=await api('GET','/api/ping',undefined,CFG.url,PIN);
     if(j.role!=='admin')throw {status:401};
     CFG.key=PIN;try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}
-    CLOUD_ROLE='admin';PIN_BUSY=false;closePin();syncUI();setRole('admin');pull();flush();toast('เข้าสู่หน้าแอดมินแล้ว');
+    CLOUD_ROLE='admin';PIN_BUSY=false;closePin();syncUI();setRole('admin');pull();flush();toast('ปลดล็อกการแก้ไขแล้ว');
   }catch(e){
     PIN_BUSY=false;
     document.getElementById('pinSub').textContent=(e&&e.status===401)?'รหัสไม่ถูกต้อง ลองใหม่':((e&&e.message)||'ตรวจรหัสไม่ได้ เช็กอินเทอร์เน็ต');
@@ -1114,7 +1120,7 @@ document.addEventListener('keydown',function(e){
   else if(e.key==='Backspace'){pinBack();e.preventDefault();}
   else if(e.key==='Escape'){closePin();}
 });
-function adminLogout(){CFG.key='';try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}CLOUD_ROLE='driver';setRole('driver');syncUI();toast('ออกจากหน้าแอดมินแล้ว');}
+function adminLogout(){CFG.key='';try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}CLOUD_ROLE='driver';renderAdmin();syncUI();toast('ล็อกการแก้ไขแล้ว');}
 function closeCfg(){document.getElementById('cfgModal').hidden=true;}
 async function testCfg(){
   var u=document.getElementById('cfgUrl').value.trim().replace(/\/+$/,''), k=document.getElementById('cfgKey').value.trim();
@@ -1128,7 +1134,6 @@ async function saveCfg(){
   CFG={url:document.getElementById('cfgUrl').value.trim().replace(/\/+$/,''),key:document.getElementById('cfgKey').value.trim()};
   try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}
   CLOUD_ROLE=j.role;LOADED={};DB=load();S={view:'home'};
-  if(CLOUD_ROLE==='driver'&&ROLE==='admin')setRole('driver');
   syncUI();await pull();flush();
   if(CLOUD_ROLE==='admin'){closeCfg();setRole('admin');toast('เข้าสู่หน้าแอดมินแล้ว');}else{openCfg();toast('เชื่อมคลาวด์แล้ว');}
 }
@@ -1158,9 +1163,9 @@ document.getElementById('todayTxt').textContent=thDate(ymd(),{weekday:'short',da
 document.getElementById('ruleKm').textContent=MAXKM;
 var r0='driver';try{r0=localStorage.getItem(KEY+'_role')||'driver';}catch(e){}
 document.getElementById('carRows').addEventListener('input',function(){CARS_DIRTY=true;});
-save();setRole(cloud()&&r0==='admin'?'driver':r0);syncUI();
+save();setRole(r0);syncUI();
 if(cloud()){
-  api('GET','/api/ping').then(function(j){CLOUD_ROLE=j.role;if(CLOUD_ROLE==='admin'&&r0==='admin')setRole('admin');syncUI();}).catch(function(e){LAST_ERR=e.message;syncUI();});
+  api('GET','/api/ping').then(function(j){CLOUD_ROLE=j.role;if(ROLE==='admin')renderAdmin();syncUI();}).catch(function(e){LAST_ERR=e.message;syncUI();});
   pull().then(flush);
 }
 setInterval(function(){if(cloud()&&!document.hidden){flush();pull();}},60000);
