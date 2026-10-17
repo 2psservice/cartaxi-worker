@@ -8,7 +8,8 @@
  *   photos/<YYYY-MM>/<ชื่อไฟล์>.jpg          รูปหน้าปัด / บิล / รูปอาการซ่อม
  *
  * สิทธิ์ (ส่งรหัสใน header X-App-Key)
- *   APP_KEY   = รหัสคนขับ  : อ่านข้อมูล, ส่งเลขไมล์, แจ้งซ่อมใหม่, อัปโหลดรูป
+ *   (ไม่ใส่รหัส) = คนขับ   : อ่านข้อมูล, ส่งเลขไมล์, แจ้งซ่อมใหม่, อัปโหลดรูป
+ *   APP_KEY   = รหัสคนขับ  : สิทธิ์เดียวกับคนขับ (ใช้เมื่อตั้ง REQUIRE_APP_KEY = "true")
  *   ADMIN_KEY = รหัสแอดมิน : ทำได้ทุกอย่าง + แก้รายการรถ + เปลี่ยนสถานะซ่อม
  * รูปเปิดดูได้ผ่าน /photos/... (ชื่อไฟล์สุ่ม เดาไม่ได้) เพื่อให้แท็ก <img> แสดงได้
  */
@@ -40,6 +41,8 @@ function roleOf(req, env) {
   const k = req.headers.get('X-App-Key') || '';
   if (env.ADMIN_KEY && k === env.ADMIN_KEY) return 'admin';
   if (env.APP_KEY && k === env.APP_KEY) return 'driver';
+  // ไม่ใส่รหัส = ใช้งานแบบคนขับได้เลย (ปิดได้โดยตั้งตัวแปร REQUIRE_APP_KEY = "true")
+  if (!k && env.REQUIRE_APP_KEY !== 'true') return 'driver';
   return null;
 }
 

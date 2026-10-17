@@ -397,8 +397,8 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
     <div style="font-size:13px;color:var(--mute)">ใส่ที่อยู่ Worker และรหัสแอป เพื่อให้มือถือทุกเครื่องและคอมแอดมินเห็นข้อมูลชุดเดียวกัน รูปและข้อมูลจะเก็บใน bucket <b>cartaxi</b></div>
     <label class="lab" for="cfgUrl">ที่อยู่ Worker</label>
     <input id="cfgUrl" class="inp" placeholder="https://cartaxi-api.xxxx.workers.dev" autocomplete="off">
-    <label class="lab" for="cfgKey">รหัสแอป (คนขับ) หรือ รหัสแอดมิน</label>
-    <input id="cfgKey" class="inp" type="password" placeholder="รหัสที่ตั้งไว้ใน Worker" autocomplete="off">
+    <label class="lab" for="cfgKey">รหัสแอดมิน (เฉพาะหัวหน้า · คนขับเว้นว่างได้)</label>
+    <input id="cfgKey" class="inp" type="password" placeholder="คนขับไม่ต้องใส่" autocomplete="off">
     <div id="cfgMsg" class="note" hidden></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="sm" onclick="testCfg()">ทดสอบการเชื่อมต่อ</button>
@@ -428,7 +428,7 @@ var HOSTED=/^https?:$/.test(location.protocol)&&!/github\.io$/.test(location.hos
 if(HOSTED&&!CLOUD_URL)CLOUD_URL=location.origin;
 var CLOUD_KEY='';   // รหัสคนขับ (APP_KEY) — ห้ามใส่รหัสแอดมินในไฟล์ที่แจกคนขับ
 var CFG=(function(){var c={url:CLOUD_URL,key:CLOUD_KEY};try{var j=JSON.parse(localStorage.getItem(KEY+'_cfg')||'null');if(j)c=j;}catch(e){}c.url=String(c.url||'').trim().replace(/\/+$/,'');c.key=String(c.key||'').trim();return c;})();
-function cloud(){return !!(CFG.url&&CFG.key);}
+function cloud(){return !!CFG.url;}
 var CLOUD_ROLE=null, LAST_SYNC=null, LAST_ERR='', LOADED={}, CARS_DIRTY=false;
 var DB=load();
 function store(){return cloud()?KEY+'_cloud':KEY;}
@@ -503,7 +503,7 @@ function flags(r){
 /* ---------- role ---------- */
 var ROLE='driver';
 function setRole(r){
-  if(r==='admin'&&cloud()&&CLOUD_ROLE==='driver')r='driver';
+  if(r==='admin'&&cloud()&&CLOUD_ROLE!=='admin'){openAdminLogin();return;}
   ROLE=r;
   document.getElementById('rDriver').classList.toggle('on',r==='driver');
   document.getElementById('rAdmin').classList.toggle('on',r==='admin');
@@ -948,7 +948,7 @@ var OUT=(function(){try{return JSON.parse(localStorage.getItem(KEY+'_out')||'[]'
 function saveOut(){try{localStorage.setItem(KEY+'_out',JSON.stringify(OUT));}catch(e){toast('หน่วยความจำเครื่องเต็ม ต่ออินเทอร์เน็ตเพื่อส่งข้อมูลที่ค้างอยู่');}}
 function monthAdd(m,n){var d=new Date(m+'-01T00:00:00');d.setMonth(d.getMonth()+n);return ymd(d).slice(0,7);}
 async function api(method,path,body,url,key){
-  var h={'X-App-Key':key||CFG.key}, b;
+  var h={}, b, kk=(key===undefined?CFG.key:key);if(kk)h['X-App-Key']=kk;
   if(body instanceof Blob){h['Content-Type']='image/jpeg';b=body;}
   else if(body!==undefined){h['Content-Type']='application/json';b=JSON.stringify(body);}
   var res;
@@ -1031,13 +1031,12 @@ function rerender(){if(ROLE==='admin')renderAdmin();else renderDriver();}
 function syncUI(){
   var b=document.getElementById('syncBtn');if(!b)return;
   var cls='sync', txt;
-  if(!cloud()){txt=HOSTED?'ใส่รหัสแอปเพื่อเริ่มใช้งาน':'เก็บในเครื่องนี้ · ตั้งค่าคลาวด์';}
+  if(!cloud()){txt='เก็บในเครื่องนี้ · ตั้งค่าคลาวด์';}
   else if(OUT.length){cls+=LAST_ERR?' err':' busy';txt=(LAST_ERR?'รอส่ง ':'กำลังส่ง ')+OUT.length+' รายการ';}
   else if(LAST_ERR){cls+=' err';txt='ออฟไลน์';}
   else if(LAST_SYNC){cls+=' ok';txt='คลาวด์ · '+String(LAST_SYNC.getHours()).padStart(2,'0')+':'+String(LAST_SYNC.getMinutes()).padStart(2,'0');}
   else{cls+=' busy';txt='กำลังเชื่อมคลาวด์…';}
   b.className=cls;b.innerHTML='<span class="dot"></span>'+txt;
-  document.getElementById('rAdmin').hidden=cloud()&&CLOUD_ROLE==='driver';
 }
 function cfgMsg(t,kind){var m=document.getElementById('cfgMsg');m.hidden=!t;m.textContent=t||'';m.className='note '+(kind==='ok'?'n-ok':kind==='bad'?'n-bad':'n-warn');}
 function openCfg(){
@@ -1047,13 +1046,18 @@ function openCfg(){
   document.getElementById('cfgState').textContent=on?('เชื่อมอยู่ในสิทธิ์ '+(CLOUD_ROLE==='admin'?'แอดมิน':CLOUD_ROLE==='driver'?'คนขับ':'—')+(OUT.length?' · ค้างส่ง '+OUT.length+' รายการ':' · ส่งครบแล้ว')+(LAST_SYNC?' · อัปเดตล่าสุด '+LAST_SYNC.toLocaleTimeString('th-TH'):'')):'';
   var hasLocal=false;try{var lj=JSON.parse(localStorage.getItem(KEY)||'null');hasLocal=!!(lj&&lj.cars&&lj.cars.length);}catch(e){}
   document.getElementById('cfgUpload').hidden=!(on&&CLOUD_ROLE==='admin'&&hasLocal);
+  document.getElementById('cfgOff').hidden=HOSTED;
   document.getElementById('cfgModal').hidden=false;
+}
+function openAdminLogin(){
+  openCfg();document.getElementById('cfgKey').value='';
+  cfgMsg('หน้าแอดมินต้องใช้รหัสแอดมิน (ADMIN_KEY) ใส่ครั้งเดียว เครื่องนี้จะจำไว้','warn');
+  setTimeout(function(){document.getElementById('cfgKey').focus();},50);
 }
 function closeCfg(){document.getElementById('cfgModal').hidden=true;}
 async function testCfg(){
   var u=document.getElementById('cfgUrl').value.trim().replace(/\/+$/,''), k=document.getElementById('cfgKey').value.trim();
   if(!/^https:\/\//.test(u)){cfgMsg('ที่อยู่ต้องขึ้นต้นด้วย https://','bad');return null;}
-  if(!k){cfgMsg('ใส่รหัสแอป','bad');return null;}
   cfgMsg('กำลังทดสอบ…');
   try{var j=await api('GET','/api/ping',undefined,u,k);cfgMsg('เชื่อมได้ · สิทธิ์ '+(j.role==='admin'?'แอดมิน':'คนขับ'),'ok');return j;}
   catch(e){cfgMsg(e.status===401?'รหัสแอปไม่ถูกต้อง':e.message,'bad');return null;}
@@ -1064,7 +1068,8 @@ async function saveCfg(){
   try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}
   CLOUD_ROLE=j.role;LOADED={};DB=load();S={view:'home'};
   if(CLOUD_ROLE==='driver'&&ROLE==='admin')setRole('driver');
-  syncUI();await pull();flush();openCfg();toast('เชื่อมคลาวด์แล้ว');
+  syncUI();await pull();flush();
+  if(CLOUD_ROLE==='admin'){closeCfg();setRole('admin');toast('เข้าสู่หน้าแอดมินแล้ว');}else{openCfg();toast('เชื่อมคลาวด์แล้ว');}
 }
 var offArm=false;
 function disconnectCfg(){
@@ -1092,12 +1097,11 @@ document.getElementById('todayTxt').textContent=thDate(ymd(),{weekday:'short',da
 document.getElementById('ruleKm').textContent=MAXKM;
 var r0='driver';try{r0=localStorage.getItem(KEY+'_role')||'driver';}catch(e){}
 document.getElementById('carRows').addEventListener('input',function(){CARS_DIRTY=true;});
-save();setRole(r0);syncUI();
+save();setRole(cloud()&&r0==='admin'?'driver':r0);syncUI();
 if(cloud()){
-  api('GET','/api/ping').then(function(j){CLOUD_ROLE=j.role;if(CLOUD_ROLE==='driver'&&ROLE==='admin')setRole('driver');syncUI();}).catch(function(e){LAST_ERR=e.message;syncUI();});
+  api('GET','/api/ping').then(function(j){CLOUD_ROLE=j.role;if(CLOUD_ROLE==='admin'&&r0==='admin')setRole('admin');syncUI();}).catch(function(e){LAST_ERR=e.message;syncUI();});
   pull().then(flush);
 }
-if(HOSTED&&!cloud())setTimeout(function(){openCfg();cfgMsg('ใส่รหัสแอปที่ได้รับจากหัวหน้า (รหัสคนขับ หรือ รหัสแอดมิน) แล้วกด "บันทึกและเชื่อมต่อ"','warn');document.getElementById('cfgKey').focus();},300);
 setInterval(function(){if(cloud()&&!document.hidden){flush();pull();}},60000);
 window.addEventListener('online',function(){flush();pull();});
 document.addEventListener('visibilitychange',function(){if(!document.hidden&&cloud()){flush();pull();}});
