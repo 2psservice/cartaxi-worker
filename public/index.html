@@ -327,7 +327,7 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
       <input id="aDate" type="date" class="sm" onchange="renderAdmin()">
       <button class="sm" onclick="exportXlsx()">ส่งออก Excel (เดือนนี้ + งานซ่อม)</button>
       <button class="sm amb" onclick="copyMissing()">คัดลอกข้อความเตือนคนยังไม่ส่ง</button>
-      <button class="sm" id="logoutBtn" onclick="adminLogout()">ล็อกการแก้ไข</button>
+      <button class="sm" id="logoutBtn" onclick="adminLogout()" hidden>ล็อกการแก้ไข</button>
     </div>
   </div>
 
@@ -819,10 +819,11 @@ function otherCar(){goHome();}
 var TAB='all';
 document.getElementById('tabs').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;TAB=b.dataset.t;Array.prototype.forEach.call(this.children,function(x){x.classList.toggle('on',x===b);});renderAdmin();});
 function renderAdmin(){
-  var ro=cloud()&&CLOUD_ROLE!=='admin';
-  document.getElementById('vAdmin').classList.toggle('ro',ro);
-  document.getElementById('roBar').hidden=!ro;
-  document.getElementById('logoutBtn').hidden=!(cloud()&&CLOUD_ROLE==='admin');
+  // ไม่มีโหมดล็อกแล้ว: ทุกคนเพิ่ม/แก้/ลบรถ และเปลี่ยนสถานะซ่อมได้
+  var ro=false;
+  document.getElementById('vAdmin').classList.remove('ro');
+  document.getElementById('roBar').hidden=true;
+  document.getElementById('logoutBtn').hidden=true;
   var dEl=document.getElementById('aDate'); if(!dEl.value)dEl.value=ymd();
   var d=dEl.value;
   if(cloud()&&d&&!LOADED[d.slice(0,7)]&&!PULLING)pull(d.slice(0,7));

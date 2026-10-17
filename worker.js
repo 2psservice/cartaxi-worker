@@ -8,9 +8,9 @@
  *   photos/<YYYY-MM>/<ชื่อไฟล์>.jpg          รูปหน้าปัด / บิล / รูปอาการซ่อม
  *
  * สิทธิ์ (ส่งรหัสใน header X-App-Key)
- *   (ไม่ใส่รหัส) = คนขับ   : อ่านข้อมูล, ส่งเลขไมล์, แจ้งซ่อมใหม่, อัปโหลดรูป
+ *   (ไม่ใส่รหัส) = คนขับ   : ทำได้ทุกอย่าง — อ่านข้อมูล, ส่งเลขไมล์, เพิ่ม/แก้/ลบรถ, แจ้งซ่อม/เปลี่ยนสถานะซ่อม, อัปโหลดรูป
  *   APP_KEY   = รหัสคนขับ  : สิทธิ์เดียวกับคนขับ (ใช้เมื่อตั้ง REQUIRE_APP_KEY = "true")
- *   ADMIN_KEY = รหัสแอดมิน : ทำได้ทุกอย่าง + แก้รายการรถ + เปลี่ยนสถานะซ่อม
+ *   ADMIN_KEY = รหัสแอดมิน : สิทธิ์เท่าคนขับ (ไม่จำเป็นต้องใช้แล้ว)
  * รูปเปิดดูได้ผ่าน /photos/... (ชื่อไฟล์สุ่ม เดาไม่ได้) เพื่อให้แท็ก <img> แสดงได้
  */
 
@@ -113,7 +113,7 @@ export default {
       if (seg[0] === 'cars' && seg.length === 1) {
         if (m === 'GET') return json(env, await getJson(env, 'data/cars.json', []));
         if (m === 'PUT') {
-          if (role !== 'admin') return fail(env, 403, 'ต้องใช้รหัสแอดมิน');
+          // ทุกคนเพิ่ม/แก้/ลบรถได้ (ไม่ต้องใช้รหัสแอดมิน)
           const cars = await readJson(req, env);
           if (!Array.isArray(cars) || cars.some((c) => !c || !ID_RE.test(String(c.id)))) return fail(env, 400, 'รูปแบบรายการรถไม่ถูกต้อง');
           await putJson(env, 'data/cars.json', cars);
@@ -130,11 +130,7 @@ export default {
           const t = await readJson(req, env);
           if (!t || t.id !== id || !ID_RE.test(String(t.carId))) return fail(env, 400, 'ข้อมูลงานซ่อมไม่ถูกต้อง');
           const key = 'data/repairs/' + id + '.json';
-          if (role !== 'admin') {
-            // คนขับเปิดงานใหม่ได้เท่านั้น (สถานะ "แจ้งซ่อม") แก้งานที่มีอยู่แล้วไม่ได้
-            if (await env.BUCKET.head(key)) return fail(env, 403, 'เปลี่ยนสถานะซ่อมได้เฉพาะแอดมิน');
-            if (t.status !== 'reported') return fail(env, 403, 'คนขับแจ้งซ่อมได้เท่านั้น');
-          }
+          // ทุกคนเปิดงานซ่อมและเปลี่ยนสถานะซ่อมได้ (ไม่ต้องใช้รหัสแอดมิน)
           await putJson(env, key, t);
           return json(env, { ok: true });
         }
