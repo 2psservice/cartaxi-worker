@@ -423,13 +423,16 @@ var FN=['ว่าง','1/8','1/4','3/8','1/2','5/8','3/4','7/8','เต็ม']
 /* ===== ตั้งค่าคลาวด์ =====
    ใส่ค่าไว้ตรงนี้ได้เลย แล้วแจกไฟล์ให้คนขับเปิดใช้งานทันทีโดยไม่ต้องตั้งค่าเอง */
 var CLOUD_URL='';   // เช่น https://cartaxi-api.xxxx.workers.dev
+/* เปิดจากเว็บของ Worker เอง (เช่น https://cartaxi-api.skgsgk.workers.dev/) ใช้ที่อยู่เว็บนั้นเป็นคลาวด์อัตโนมัติ */
+var HOSTED=/^https?:$/.test(location.protocol)&&!/github\.io$/.test(location.hostname)&&location.hostname!=='localhost';
+if(HOSTED&&!CLOUD_URL)CLOUD_URL=location.origin;
 var CLOUD_KEY='';   // รหัสคนขับ (APP_KEY) — ห้ามใส่รหัสแอดมินในไฟล์ที่แจกคนขับ
 var CFG=(function(){var c={url:CLOUD_URL,key:CLOUD_KEY};try{var j=JSON.parse(localStorage.getItem(KEY+'_cfg')||'null');if(j)c=j;}catch(e){}c.url=String(c.url||'').trim().replace(/\/+$/,'');c.key=String(c.key||'').trim();return c;})();
 function cloud(){return !!(CFG.url&&CFG.key);}
 var CLOUD_ROLE=null, LAST_SYNC=null, LAST_ERR='', LOADED={}, CARS_DIRTY=false;
 var DB=load();
 function store(){return cloud()?KEY+'_cloud':KEY;}
-function load(){var j=null;try{j=JSON.parse(localStorage.getItem(store())||'null');}catch(e){}if(!j||!j.cars)j=cloud()?{cars:[],records:[],repairs:[]}:seed();return migrate(j);}
+function load(){var j=null;try{j=JSON.parse(localStorage.getItem(store())||'null');}catch(e){}if(!j||!j.cars)j=(cloud()||HOSTED)?{cars:[],records:[],repairs:[]}:seed();return migrate(j);}
 function migrate(j){
   j.repairs=j.repairs||[];
   j.cars.forEach(function(c){
@@ -1028,7 +1031,7 @@ function rerender(){if(ROLE==='admin')renderAdmin();else renderDriver();}
 function syncUI(){
   var b=document.getElementById('syncBtn');if(!b)return;
   var cls='sync', txt;
-  if(!cloud()){txt='เก็บในเครื่องนี้ · ตั้งค่าคลาวด์';}
+  if(!cloud()){txt=HOSTED?'ใส่รหัสแอปเพื่อเริ่มใช้งาน':'เก็บในเครื่องนี้ · ตั้งค่าคลาวด์';}
   else if(OUT.length){cls+=LAST_ERR?' err':' busy';txt=(LAST_ERR?'รอส่ง ':'กำลังส่ง ')+OUT.length+' รายการ';}
   else if(LAST_ERR){cls+=' err';txt='ออฟไลน์';}
   else if(LAST_SYNC){cls+=' ok';txt='คลาวด์ · '+String(LAST_SYNC.getHours()).padStart(2,'0')+':'+String(LAST_SYNC.getMinutes()).padStart(2,'0');}
@@ -1094,6 +1097,7 @@ if(cloud()){
   api('GET','/api/ping').then(function(j){CLOUD_ROLE=j.role;if(CLOUD_ROLE==='driver'&&ROLE==='admin')setRole('driver');syncUI();}).catch(function(e){LAST_ERR=e.message;syncUI();});
   pull().then(flush);
 }
+if(HOSTED&&!cloud())setTimeout(function(){openCfg();cfgMsg('ใส่รหัสแอปที่ได้รับจากหัวหน้า (รหัสคนขับ หรือ รหัสแอดมิน) แล้วกด "บันทึกและเชื่อมต่อ"','warn');document.getElementById('cfgKey').focus();},300);
 setInterval(function(){if(cloud()&&!document.hidden){flush();pull();}},60000);
 window.addEventListener('online',function(){flush();pull();});
 document.addEventListener('visibilitychange',function(){if(!document.hidden&&cloud()){flush();pull();}});
