@@ -1,0 +1,17 @@
+name = "cartaxi-api"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+# ผูก R2 bucket "cartaxi" ให้ Worker ใช้งานผ่านตัวแปร env.BUCKET
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "cartaxi"
+
+# จำกัดเว็บที่เรียก API ได้ (ใส่โดเมนที่วางไฟล์ HTML เช่น "https://fleet.2psservices.com")
+# ปล่อย "*" ไว้ได้ถ้าเปิดไฟล์ HTML จากหลายที่
+[vars]
+ALLOW_ORIGIN = "*"
+
+# รหัสลับ ตั้งด้วยคำสั่ง (ห้ามเขียนลงไฟล์นี้):
+#   npx wrangler secret put APP_KEY     ← รหัสคนขับ
+#   npx wrangler secret put ADMIN_KEY   ← รหัสแอดมิน

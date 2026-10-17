@@ -1,0 +1,21 @@
+{
+  "name": "cartaxi-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fleet Daily Check API — Cloudflare Worker เก็บเลขไมล์ น้ำมัน งานซ่อม และรูป ใน R2 bucket cartaxi",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.20.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "BUCKET": { "description": "R2 bucket ที่เก็บข้อมูลและรูป ให้เลือก bucket เดิมชื่อ cartaxi" },
+      "APP_KEY": { "description": "รหัสสำหรับคนขับ ตั้งเองอย่างน้อย 12 ตัวอักษร ใช้ส่งเลขไมล์และแจ้งซ่อม" },
+      "ADMIN_KEY": { "description": "รหัสสำหรับแอดมิน ตั้งเองอย่างน้อย 12 ตัวอักษร ต้องไม่ซ้ำกับรหัสคนขับ" },
+      "ALLOW_ORIGIN": { "description": "เว็บที่เรียก API ได้ ใส่ * ได้ถ้าเปิดไฟล์ HTML จากหลายที่" }
+    }
+  }
+}
