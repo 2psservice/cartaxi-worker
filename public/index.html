@@ -133,6 +133,23 @@ th:first-child,td:first-child{padding-left:18px} th:last-child,td:last-child{pad
 .cfgm{align-items:flex-start;overflow-y:auto}
 .cfgbox{width:100%;max-width:520px;padding:20px;display:flex;flex-direction:column;gap:10px;margin-top:6vh}
 .n-ok{background:var(--greenBg);color:var(--greenTx)}
+.pinm{position:fixed;inset:0;background:var(--ground);z-index:55;overflow-y:auto;padding:calc(16px + env(safe-area-inset-top,0px)) 16px 24px}
+.pinbox{max-width:380px;margin:0 auto;display:flex;flex-direction:column;align-items:stretch;gap:18px}
+.pinhead{display:flex;align-items:center;gap:12px}
+.pinback{width:44px;height:44px;border-radius:50%;border:none;background:#fff;box-shadow:0 1px 3px rgba(22,32,46,.12);display:flex;align-items:center;justify-content:center;color:var(--ink)}
+.lock{align-self:center;width:76px;height:76px;border-radius:20px;background:var(--amberBg);color:var(--amber);display:flex;align-items:center;justify-content:center;margin-top:8px}
+.pindots{display:flex;justify-content:center;gap:12px;min-height:16px}
+.pindots i{width:15px;height:15px;border-radius:50%;background:var(--line);transition:background .1s}
+.pindots i.on{background:var(--ink)}
+.pindots.bad i{background:var(--red)}
+.pindots.shake{animation:shake .35s}
+@keyframes shake{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+.pad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pad button{height:72px;border-radius:16px;border:none;background:#fff;font-family:var(--display);font-weight:700;font-size:26px;color:var(--ink);box-shadow:0 1px 3px rgba(22,32,46,.08)}
+.pad button:active{background:var(--ground2)}
+.pad button.ghost{background:transparent;box-shadow:none;font-family:var(--body);font-weight:500;font-size:16px;color:var(--mute);display:flex;align-items:center;justify-content:center}
+.pad button:disabled{opacity:.5}
+@media (prefers-reduced-motion:reduce){.pindots.shake{animation:none}}
 .plate .tag.p-red{color:#fff}
 .fleet{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
 .fhead{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
@@ -308,6 +325,7 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
       <input id="aDate" type="date" class="sm" onchange="renderAdmin()">
       <button class="sm" onclick="exportXlsx()">ส่งออก Excel (เดือนนี้ + งานซ่อม)</button>
       <button class="sm amb" onclick="copyMissing()">คัดลอกข้อความเตือนคนยังไม่ส่ง</button>
+      <button class="sm" id="logoutBtn" onclick="adminLogout()">ออกจากแอดมิน</button>
     </div>
   </div>
 
@@ -390,6 +408,23 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
 
 <div id="modal" class="modal" hidden onclick="this.hidden=true"><img id="modalImg" alt="รูปขยาย"></div>
 <div id="toast" class="toast" hidden></div>
+
+<div id="pinModal" class="pinm" hidden>
+  <div class="pinbox" role="dialog" aria-labelledby="pinTitle">
+    <div class="pinhead"><button class="pinback" onclick="closePin()" aria-label="กลับ"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div><div class="disp" style="font-size:20px">หน้าแอดมิน</div><div style="font-size:13px;color:var(--mute)">สำหรับหัวหน้าฝ่ายยานพาหนะ</div></div></div>
+    <div class="lock"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg></div>
+    <div style="text-align:center"><div class="disp" id="pinTitle" style="font-size:20px">ใส่รหัสผู้ดูแล</div><div id="pinSub" style="font-size:13px;color:var(--mute)">รหัสตัวเลข 8 หลัก</div></div>
+    <div id="pinDots" class="pindots" aria-live="polite"></div>
+    <div class="pad">
+      <button onclick="pinKey('1')">1</button><button onclick="pinKey('2')">2</button><button onclick="pinKey('3')">3</button>
+      <button onclick="pinKey('4')">4</button><button onclick="pinKey('5')">5</button><button onclick="pinKey('6')">6</button>
+      <button onclick="pinKey('7')">7</button><button onclick="pinKey('8')">8</button><button onclick="pinKey('9')">9</button>
+      <button class="ghost" onclick="pinClear()">ล้าง</button><button onclick="pinKey('0')">0</button>
+      <button class="ghost" onclick="pinBack()" aria-label="ลบ"><svg aria-hidden="true" width="26" height="20" viewBox="0 0 26 20" fill="currentColor"><path d="M8 1h15a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8L1 10z"/><path d="M12 6l8 8M20 6l-8 8" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+    </div>
+  </div>
+</div>
 
 <div id="cfgModal" class="modal cfgm" hidden>
   <div class="card cfgbox" role="dialog" aria-labelledby="cfgTitle">
@@ -782,6 +817,7 @@ function otherCar(){goHome();}
 var TAB='all';
 document.getElementById('tabs').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;TAB=b.dataset.t;Array.prototype.forEach.call(this.children,function(x){x.classList.toggle('on',x===b);});renderAdmin();});
 function renderAdmin(){
+  document.getElementById('logoutBtn').hidden=!cloud();
   var dEl=document.getElementById('aDate'); if(!dEl.value)dEl.value=ymd();
   var d=dEl.value;
   if(cloud()&&d&&!LOADED[d.slice(0,7)]&&!PULLING)pull(d.slice(0,7));
@@ -1049,11 +1085,36 @@ function openCfg(){
   document.getElementById('cfgOff').hidden=HOSTED;
   document.getElementById('cfgModal').hidden=false;
 }
-function openAdminLogin(){
-  openCfg();document.getElementById('cfgKey').value='';
-  cfgMsg('หน้าแอดมินต้องใช้รหัสแอดมิน (ADMIN_KEY) ใส่ครั้งเดียว เครื่องนี้จะจำไว้','warn');
-  setTimeout(function(){document.getElementById('cfgKey').focus();},50);
+var PIN='', PIN_BUSY=false, PIN_LEN=8;
+function openAdminLogin(){PIN='';drawPin();document.getElementById('pinSub').textContent='รหัสตัวเลข 8 หลัก';document.getElementById('pinModal').hidden=false;}
+function closePin(){document.getElementById('pinModal').hidden=true;PIN='';}
+function drawPin(bad){
+  var h='';for(var i=0;i<PIN_LEN;i++)h+='<i class="'+(i<PIN.length?'on':'')+'"></i>';
+  var d=document.getElementById('pinDots');d.innerHTML=h;d.className='pindots'+(bad?' bad shake':'');
 }
+function pinKey(n){if(PIN_BUSY||PIN.length>=PIN_LEN)return;PIN+=n;drawPin();if(PIN.length===PIN_LEN)checkPin();}
+function pinBack(){if(PIN_BUSY)return;PIN=PIN.slice(0,-1);drawPin();}
+function pinClear(){if(PIN_BUSY)return;PIN='';drawPin();}
+async function checkPin(){
+  PIN_BUSY=true;document.getElementById('pinSub').textContent='กำลังตรวจรหัส…';
+  try{
+    var j=await api('GET','/api/ping',undefined,CFG.url,PIN);
+    if(j.role!=='admin')throw {status:401};
+    CFG.key=PIN;try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}
+    CLOUD_ROLE='admin';PIN_BUSY=false;closePin();syncUI();setRole('admin');pull();flush();toast('เข้าสู่หน้าแอดมินแล้ว');
+  }catch(e){
+    PIN_BUSY=false;
+    document.getElementById('pinSub').textContent=(e&&e.status===401)?'รหัสไม่ถูกต้อง ลองใหม่':((e&&e.message)||'ตรวจรหัสไม่ได้ เช็กอินเทอร์เน็ต');
+    drawPin(true);setTimeout(function(){PIN='';drawPin();},450);
+  }
+}
+document.addEventListener('keydown',function(e){
+  if(document.getElementById('pinModal').hidden)return;
+  if(/^[0-9]$/.test(e.key)){pinKey(e.key);e.preventDefault();}
+  else if(e.key==='Backspace'){pinBack();e.preventDefault();}
+  else if(e.key==='Escape'){closePin();}
+});
+function adminLogout(){CFG.key='';try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}CLOUD_ROLE='driver';setRole('driver');syncUI();toast('ออกจากหน้าแอดมินแล้ว');}
 function closeCfg(){document.getElementById('cfgModal').hidden=true;}
 async function testCfg(){
   var u=document.getElementById('cfgUrl').value.trim().replace(/\/+$/,''), k=document.getElementById('cfgKey').value.trim();
