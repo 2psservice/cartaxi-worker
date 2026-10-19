@@ -327,7 +327,7 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
       <input id="aDate" type="date" class="sm" onchange="renderAdmin()">
       <button class="sm" onclick="exportXlsx()">ส่งออก Excel (เดือนนี้ + งานซ่อม)</button>
       <button class="sm amb" onclick="copyMissing()">คัดลอกข้อความเตือนคนยังไม่ส่ง</button>
-      <button class="sm" id="logoutBtn" onclick="adminLogout()" hidden>ล็อกการแก้ไข</button>
+      <button class="sm" id="logoutBtn" onclick="adminLogout()">ออกจากหน้าแอดมิน</button>
     </div>
   </div>
 
@@ -415,7 +415,7 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
 <div id="pinModal" class="pinm" hidden>
   <div class="pinbox" role="dialog" aria-labelledby="pinTitle">
     <div class="pinhead"><button class="pinback" onclick="closePin()" aria-label="กลับ"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
-      <div><div class="disp" style="font-size:20px">ปลดล็อกการแก้ไข</div><div style="font-size:13px;color:var(--mute)">เพิ่ม/แก้รถ และเปลี่ยนสถานะซ่อม</div></div></div>
+      <div><div class="disp" style="font-size:20px">เข้าหน้าแอดมิน</div><div style="font-size:13px;color:var(--mute)">ต้องใส่รหัสก่อนเข้าใช้งาน</div></div></div>
     <div class="lock"><svg aria-hidden="true" width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg></div>
     <div style="text-align:center"><div class="disp" id="pinTitle" style="font-size:20px">ใส่รหัสผู้ดูแล</div><div id="pinSub" style="font-size:13px;color:var(--mute)">รหัสตัวเลข 8 หลัก</div></div>
     <div id="pinDots" class="pindots" aria-live="polite"></div>
@@ -540,7 +540,11 @@ function flags(r){
 
 /* ---------- role ---------- */
 var ROLE='driver';
+/* หน้าแอดมินต้องใส่รหัส 8 หลักก่อนเข้า (จำไว้จนปิดแอป/แท็บ) */
+var ADMIN_PIN='88888888', ADMIN_OK=false;
+try{ADMIN_OK=sessionStorage.getItem(KEY+'_adm')==='1';}catch(e){}
 function setRole(r){
+  if(r==='admin'&&!ADMIN_OK){openAdminLogin();return;}
   ROLE=r;
   document.getElementById('rDriver').classList.toggle('on',r==='driver');
   document.getElementById('rAdmin').classList.toggle('on',r==='admin');
@@ -823,7 +827,6 @@ function renderAdmin(){
   var ro=false;
   document.getElementById('vAdmin').classList.remove('ro');
   document.getElementById('roBar').hidden=true;
-  document.getElementById('logoutBtn').hidden=true;
   var dEl=document.getElementById('aDate'); if(!dEl.value)dEl.value=ymd();
   var d=dEl.value;
   if(cloud()&&d&&!LOADED[d.slice(0,7)]&&!PULLING)pull(d.slice(0,7));
@@ -1102,16 +1105,12 @@ function drawPin(bad){
 function pinKey(n){if(PIN_BUSY||PIN.length>=PIN_LEN)return;PIN+=n;drawPin();if(PIN.length===PIN_LEN)checkPin();}
 function pinBack(){if(PIN_BUSY)return;PIN=PIN.slice(0,-1);drawPin();}
 function pinClear(){if(PIN_BUSY)return;PIN='';drawPin();}
-async function checkPin(){
-  PIN_BUSY=true;document.getElementById('pinSub').textContent='กำลังตรวจรหัส…';
-  try{
-    var j=await api('GET','/api/ping',undefined,CFG.url,PIN);
-    if(j.role!=='admin')throw {status:401};
-    CFG.key=PIN;try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}
-    CLOUD_ROLE='admin';PIN_BUSY=false;closePin();syncUI();setRole('admin');pull();flush();toast('ปลดล็อกการแก้ไขแล้ว');
-  }catch(e){
-    PIN_BUSY=false;
-    document.getElementById('pinSub').textContent=(e&&e.status===401)?'รหัสไม่ถูกต้อง ลองใหม่':((e&&e.message)||'ตรวจรหัสไม่ได้ เช็กอินเทอร์เน็ต');
+function checkPin(){
+  if(PIN===ADMIN_PIN){
+    ADMIN_OK=true;try{sessionStorage.setItem(KEY+'_adm','1');}catch(e){}
+    closePin();setRole('admin');toast('เข้าหน้าแอดมินแล้ว');
+  }else{
+    document.getElementById('pinSub').textContent='รหัสไม่ถูกต้อง ลองใหม่';
     drawPin(true);setTimeout(function(){PIN='';drawPin();},450);
   }
 }
@@ -1121,7 +1120,7 @@ document.addEventListener('keydown',function(e){
   else if(e.key==='Backspace'){pinBack();e.preventDefault();}
   else if(e.key==='Escape'){closePin();}
 });
-function adminLogout(){CFG.key='';try{localStorage.setItem(KEY+'_cfg',JSON.stringify(CFG));}catch(e){}CLOUD_ROLE='driver';renderAdmin();syncUI();toast('ล็อกการแก้ไขแล้ว');}
+function adminLogout(){ADMIN_OK=false;try{sessionStorage.removeItem(KEY+'_adm');}catch(e){}setRole('driver');toast('ออกจากหน้าแอดมินแล้ว');}
 function closeCfg(){document.getElementById('cfgModal').hidden=true;}
 async function testCfg(){
   var u=document.getElementById('cfgUrl').value.trim().replace(/\/+$/,''), k=document.getElementById('cfgKey').value.trim();
@@ -1164,7 +1163,7 @@ document.getElementById('todayTxt').textContent=thDate(ymd(),{weekday:'short',da
 document.getElementById('ruleKm').textContent=MAXKM;
 var r0='driver';try{r0=localStorage.getItem(KEY+'_role')||'driver';}catch(e){}
 document.getElementById('carRows').addEventListener('input',function(){CARS_DIRTY=true;});
-save();setRole(r0);syncUI();
+save();setRole(r0==='admin'&&!ADMIN_OK?'driver':r0);syncUI();
 if(cloud()){
   api('GET','/api/ping').then(function(j){CLOUD_ROLE=j.role;if(ROLE==='admin')renderAdmin();syncUI();}).catch(function(e){LAST_ERR=e.message;syncUI();});
   pull().then(flush);
