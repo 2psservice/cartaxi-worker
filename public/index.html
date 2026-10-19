@@ -256,6 +256,10 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
 .trips button.out.on{background:var(--green);color:#fff}
 .trips button.in.on{background:var(--red);color:#fff}
 .trips button.on{box-shadow:0 3px 10px rgba(22,32,46,.18)}
+.hph{display:flex;gap:8px;margin-top:8px}
+.hph button{position:relative;padding:0;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:#000;width:96px;height:72px;cursor:pointer}
+.hph img{width:100%;height:100%;object-fit:cover;display:block}
+.hph span{position:absolute;left:0;right:0;bottom:0;font-size:11px;color:#fff;background:rgba(0,0,0,.55);padding:2px 0;text-align:center}
 </style>
 </head>
 <body>
@@ -846,7 +850,8 @@ function renderHist(){
     return '<div class="hcard"><div class="t"><span><b>'+thDate(r.date,{weekday:'short',day:'numeric',month:'short'})+' · '+TRIP[tripOf(r)]+'</b> <span style="color:var(--mute);font-size:13px">'+esc(r.driver)+'</span></span>'+
       '<span class="pill '+(h.km==null?'p-gray':h.km<0?'p-bad':'p-blue')+'">'+(h.km==null?'ครั้งแรก':(h.km>=0?'+':'')+fmt(h.km)+' กม.')+'</span></div>'+
       '<div class="rt">'+(r.route?esc(r.route):'<span style="color:var(--mute)">ไม่ได้ระบุเส้นทาง</span>')+(r.dest?' <b>· อยู่ '+esc(r.dest)+'</b>':'')+'</div>'+
-      '<div class="m">ไมล์ '+fmt(r.odo)+' · น้ำมัน '+FN[r.fuel]+(r.liters?' · เติม '+r.liters+' ล.':'')+(r.cost?' · '+fmt(r.cost)+' บ.':'')+(h.used!=null?' · ใช้ ~'+lit1(h.used)+' ล.':'')+(h.kml?' · '+h.kml.toFixed(1)+' กม./ล.':'')+'</div></div>';
+      '<div class="m">ไมล์ '+fmt(r.odo)+' · น้ำมัน '+FN[r.fuel]+(r.liters?' · เติม '+r.liters+' ล.':'')+(r.cost?' · '+fmt(r.cost)+' บ.':'')+(h.used!=null?' · ใช้ ~'+lit1(h.used)+' ล.':'')+(h.kml?' · '+h.kml.toFixed(1)+' กม./ล.':'')+'</div>'+
+      ((r.photoOdo||r.photoBill)?'<div class="hph">'+(r.photoOdo?'<button type="button" onclick="zoom(\''+r.photoOdo+'\')"><img src="'+r.photoOdo+'" alt="รูปหน้าปัด" loading="lazy"><span>หน้าปัด</span></button>':'')+(r.photoBill?'<button type="button" onclick="zoom(\''+r.photoBill+'\')"><img src="'+r.photoBill+'" alt="รูปบิล" loading="lazy"><span>บิลน้ำมัน</span></button>':'')+'</div>':'')+'</div>';
   }).join('')||'<div class="hcard empty">ยังไม่มีประวัติ</div>';
   var rs={};recsOf(S.carId).forEach(function(r){if(r.route)rs[r.route]=1;});
   document.getElementById('routeList').innerHTML=Object.keys(rs).slice(-15).map(function(x){return '<option value="'+esc(x)+'">';}).join('');
