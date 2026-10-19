@@ -44,3 +44,16 @@ Cloudflare Worker ที่เก็บเลขไมล์ ระดับน�
 | `GET /api/repairs` · `PUT /api/repairs/<id>` | ทุกคน (เปิดงาน + เปลี่ยนสถานะ) |
 | `PUT /api/photos/<YYYY-MM>/<name>.jpg` | ทุกคน (JPEG ≤ 3 MB) |
 | `GET /photos/<YYYY-MM>/<name>.jpg` | สาธารณะ (ชื่อไฟล์สุ่ม) |
+
+## แจ้งเตือนเข้า LINE (ขาไป / ขากลับ / แจ้งซ่อม)
+
+ส่งการ์ด (Flex) เข้ากลุ่ม LINE ทุกครั้งที่คนขับส่งขาไป ขากลับ หรือแจ้งซ่อมใหม่ ผ่าน LINE Official Account (Messaging API)
+
+1. LINE Developers → Messaging API channel → ออก **Channel access token (long-lived)**
+2. Cloudflare → Workers → cartaxi-api → Settings → Variables and Secrets → เพิ่ม Secret `LINE_TOKEN`
+3. บอกว่าจะส่งไปที่ไหน เลือกอย่างใดอย่างหนึ่ง
+   - ตั้ง Secret `LINE_TO` = groupId (หรือ userId หลายค่า คั่นด้วย `,`)
+   - หรือ ตั้ง Webhook URL ของ OA เป็น `https://<worker>/line/webhook` (+ Secret `LINE_SECRET` = Channel secret) แล้วเชิญบอทเข้ากลุ่ม ระบบจำ groupId ให้เอง
+4. หน้าแอดมิน → ปุ่ม **ทดสอบแจ้งเตือน LINE**
+
+ข้อความ push เข้ากลุ่มนับโควตาตามจำนวนสมาชิกในกลุ่ม

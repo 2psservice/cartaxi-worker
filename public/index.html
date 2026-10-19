@@ -383,6 +383,7 @@ if(window.IN_LINE){
       <input id="aDate" type="date" class="sm" onchange="renderAdmin()">
       <button class="sm" onclick="exportXlsx()">ส่งออก Excel (เดือนนี้ + งานซ่อม)</button>
       <button class="sm amb" onclick="copyMissing()">คัดลอกข้อความเตือนคนยังไม่ส่ง</button>
+      <button class="sm" onclick="testLine()">ทดสอบแจ้งเตือน LINE</button>
       <button class="sm" id="logoutBtn" onclick="adminLogout()">ออกจากหน้าแอดมิน</button>
     </div>
   </div>
@@ -816,7 +817,8 @@ function submitDaily(){
   if(miss.length){S.tried=true;updateForm();var el=document.getElementById(miss[0][0]);if(el)el.scrollIntoView({behavior:'smooth',block:'center'});toast('กรอกให้ครบก่อนส่ง: '+miss.map(function(m){return m[1];}).join(', '));return;}
   var t=ymd(), num=parseInt(document.getElementById('odoIn').value,10), lit=parseFloat(document.getElementById('liters').value);
   var trip=S.trip||'out', ex=recOn(S.carId,t,trip), now=new Date();
-  var r={id:ex?ex.id:uid(),date:t,trip:trip,time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'),carId:S.carId,
+  var pv=prevRec(S.carId,t,trip);
+  var r={id:ex?ex.id:uid(),date:t,trip:trip,km:pv?num-pv.odo:null,time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'),carId:S.carId,
     driver:document.getElementById('drvName').value.trim(),odo:num,fuel:S.fuel,fs:10,liters:(S.photoBill&&!isNaN(lit))?lit:null,cost:S.photoBill?parseFloat(String(document.getElementById('cost').value).replace(/,/g,''))||null:null,
     photoOdo:S.photoOdo,photoBill:S.photoBill,note:document.getElementById('note').value.trim(),route:document.getElementById('route').value.trim()};
   if(ex)DB.records[DB.records.indexOf(ex)]=r;else DB.records.push(r);
@@ -1279,6 +1281,13 @@ document.addEventListener('keydown',function(e){
   else if(e.key==='Backspace'){pinBack();e.preventDefault();}
   else if(e.key==='Escape'){closePin();}
 });
+async function testLine(){
+  if(!cloud()){toast('ต้องเปิดจากลิงก์แอปบนคลาวด์ก่อน');return;}
+  toast('กำลังส่งการ์ดทดสอบเข้า LINE…');
+  try{var r=await fetch(CFG.url+'/api/line/test?pin='+ADMIN_PIN);var j=await r.json();
+    toast(j.ok?'ส่งเข้า LINE แล้ว ไปดูในกลุ่มได้เลย':'ส่งไม่สำเร็จ: '+(j.error||JSON.stringify(j.result||'')));
+  }catch(e){toast('ส่งไม่สำเร็จ: '+e.message);}
+}
 function adminLogout(){ADMIN_OK=false;try{sessionStorage.removeItem(KEY+'_adm');}catch(e){}setRole('driver');toast('ออกจากหน้าแอดมินแล้ว');}
 function closeCfg(){document.getElementById('cfgModal').hidden=true;}
 async function testCfg(){

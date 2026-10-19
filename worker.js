@@ -81,8 +81,122 @@ async function readAll(env, prefix) {
   return out;
 }
 
+/* ===================== แจ้งเตือนเข้า LINE (Messaging API) =====================
+ * ตั้ง Secret ใน Cloudflare (Workers → cartaxi-api → Settings → Variables and Secrets):
+ *   LINE_TOKEN          = Channel access token (long-lived) ของ LINE Official Account
+ *   LINE_TO             = (ไม่บังคับ) groupId / userId ที่จะส่งไป คั่นด้วย , ได้หลายที่
+ *   LINE_SECRET         = (ไม่บังคับ) Channel secret ใช้ตรวจลายเซ็น webhook
+ * ถ้าไม่ตั้ง LINE_TO: ตั้ง Webhook URL ของ OA เป็น https://<worker>/line/webhook
+ *   แล้วเชิญบอทเข้ากลุ่ม ระบบจะจำ groupId ของกลุ่มล่าสุดให้เอง (data/line/target.json)
+ */
+const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+function thDay(ymd) { const [y, m, d] = String(ymd || '').split('-').map(Number); return y ? d + ' ' + TH_MON[m - 1] + ' ' + String((y + 543) % 100).padStart(2, '0') : '—'; }
+function nf(n) { return n == null || isNaN(n) ? '—' : Number(n).toLocaleString('en-US'); }
+function fuelPct(r) { if (!r || r.fuel == null) return null; return Math.round(r.fuel / (r.fs || 8) * 100); }
+function locOf(r) {
+  if (r.dest) return String(r.dest).trim();
+  const s = String(r.route || '').split(/→|->|>|,/).map((x) => x.trim()).filter(Boolean);
+  return s.length ? s[s.length - 1] : '';
+}
+function httpsUrl(u) { return /^https:\/\/[^\s"']+$/.test(String(u || '')) ? String(u) : null; }
+
+function row(icon, label, value, color) {
+  return {
+    type: 'box', layout: 'horizontal', spacing: 'md', contents: [
+      { type: 'text', text: icon + ' ' + label, size: 'sm', color: '#6B7280', flex: 4 },
+      { type: 'text', text: String(value == null || value === '' ? '—' : value), size: 'sm', weight: 'bold', color: color || '#111827', flex: 6, align: 'end', wrap: true },
+    ],
+  };
+}
+function card(color, kicker, title, rows, photo, appUrl) {
+  const b = {
+    type: 'bubble',
+    header: { type: 'box', layout: 'vertical', backgroundColor: color, paddingAll: '18px', contents: [
+      { type: 'text', text: kicker, size: 'sm', color: '#FFFFFFCC', weight: 'bold' },
+      { type: 'text', text: title, size: 'xl', color: '#FFFFFF', weight: 'bold', wrap: true, margin: 'sm' },
+    ] },
+    body: { type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '18px', contents: rows },
+  };
+  if (photo) b.hero = { type: 'image', url: photo, size: 'full', aspectRatio: '4:3', aspectMode: 'cover', action: { type: 'uri', uri: photo } };
+  if (appUrl) b.footer = { type: 'box', layout: 'vertical', contents: [
+    { type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดแอป Fleet Daily Check', uri: appUrl } },
+  ] };
+  return b;
+}
+
+async function lineTargets(env) {
+  const fixed = String(env.LINE_TO || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (fixed.length) return fixed;
+  const saved = await getJson(env, 'data/line/target.json', null);
+  return saved && saved.id ? [saved.id] : [];
+}
+async function linePush(env, alt, bubble) {
+  if (!env.LINE_TOKEN) return { ok: false, error: 'ยังไม่ได้ตั้ง LINE_TOKEN' };
+  const to = await lineTargets(env);
+  if (!to.length) return { ok: false, error: 'ยังไม่รู้ว่าจะส่งไปกลุ่มไหน (ตั้ง LINE_TO หรือเชิญบอทเข้ากลุ่ม)' };
+  const out = [];
+  for (const id of to) {
+    const res = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + env.LINE_TOKEN },
+      body: JSON.stringify({ to: id, messages: [{ type: 'flex', altText: alt.slice(0, 380), contents: bubble }] }),
+    });
+    out.push({ to: id, status: res.status, body: res.ok ? '' : (await res.text()).slice(0, 300) });
+  }
+  return { ok: out.every((x) => x.status === 200), result: out };
+}
+async function carName(env, carId) {
+  const cars = await getJson(env, 'data/cars.json', []);
+  const c = (cars || []).find((x) => x && x.id === carId);
+  return 'รถ ' + (c ? (c.plate || carId) : carId);
+}
+
+async function notifyRecord(env, r, isEdit, origin) {
+  const plate = await carName(env, r.carId);
+  const isIn = r.trip === 'in';
+  const fp = fuelPct(r), loc = locOf(r);
+  const rows = [
+    row('👤', 'ผู้ขับ', r.driver),
+    row('🕒', 'เวลา', thDay(r.date) + ' · ' + (r.time || '') + ' น.'),
+    row('🚗', 'เลขไมล์', nf(r.odo) + ' กม.'),
+  ];
+  if (r.km != null) rows.push(row('📏', 'วิ่งจากครั้งก่อน', (r.km >= 0 ? '+' : '') + nf(r.km) + ' กม.', r.km < 0 ? '#C8372D' : '#1F8A4C'));
+  if (r.route) rows.push(row('🛣️', 'ไปไหนมา', r.route));
+  if (loc) rows.push(row('📍', 'รถอยู่ที่', loc));
+  rows.push(row('⛽', 'น้ำมัน', fp == null ? '—' : fp + '%', fp != null && fp <= 25 ? '#C8372D' : null));
+  if (r.liters || r.cost) rows.push(row('🧾', 'เติมน้ำมัน', (r.liters ? r.liters + ' ล.' : '') + (r.liters && r.cost ? ' · ' : '') + (r.cost ? nf(r.cost) + ' บาท' : '')));
+  if (r.note) rows.push(row('📝', 'หมายเหตุ', r.note));
+  const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate + (isEdit ? ' (แก้ไข)' : '');
+  const alt = title + ' · ไมล์ ' + nf(r.odo) + (loc ? ' · อยู่' + loc : '') + ' · น้ำมัน ' + (fp == null ? '—' : fp + '%');
+  return linePush(env, alt, card(isIn ? '#C8372D' : '#1F8A4C', 'FLEET DAILY CHECK · 2PS', title, rows, httpsUrl(r.photoOdo), origin + '/'));
+}
+
+const REPAIR_ST = { reported: 'แจ้งซ่อม · ยังใช้ได้', waiting: 'รอซ่อม · หยุดใช้', done: 'ซ่อมเสร็จแล้ว' };
+async function notifyRepair(env, t, origin) {
+  const plate = await carName(env, t.carId);
+  const at = t.at ? new Date(t.at) : new Date();
+  const bkk = new Date(at.getTime() + 7 * 3600e3);
+  const when = thDay(bkk.toISOString().slice(0, 10)) + ' · ' + bkk.toISOString().slice(11, 16) + ' น.';
+  const rows = [
+    row('⚠️', 'อาการ', t.issue, '#A12A21'),
+    row('👤', 'แจ้งโดย', t.by),
+    row('🕒', 'เวลา', when),
+    row('🔧', 'สถานะ', REPAIR_ST[t.status] || t.status),
+  ];
+  const title = '🔧 แจ้งซ่อม · ' + plate;
+  return linePush(env, title + ' · ' + String(t.issue || ''), card('#E8740C', 'FLEET DAILY CHECK · 2PS', title, rows, httpsUrl(t.photo), origin + '/'));
+}
+
+async function hmacOk(env, body, sig) {
+  if (!env.LINE_SECRET) return true;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.LINE_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(mac)));
+  return b64 === sig;
+}
+
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const m = req.method;
@@ -101,11 +215,32 @@ export default {
         });
       }
 
+      // ---------- LINE webhook: จำ groupId ของกลุ่มที่เชิญบอทเข้าไป ----------
+      if (m === 'POST' && path === '/line/webhook') {
+        const body = await req.text();
+        if (!(await hmacOk(env, body, req.headers.get('x-line-signature') || ''))) return fail(env, 401, 'bad signature');
+        let j = {}; try { j = JSON.parse(body); } catch {}
+        for (const ev of j.events || []) {
+          const src = ev.source || {};
+          if (src.type === 'group' && src.groupId) await putJson(env, 'data/line/target.json', { id: src.groupId, type: 'group', at: new Date().toISOString() });
+        }
+        return json(env, { ok: true });
+      }
+
       if (!path.startsWith('/api/')) return fail(env, 404, 'ไม่พบหน้า');
+      const origin = url.origin;
 
       const role = roleOf(req, env);
       if (!role) return fail(env, 401, 'รหัสแอปไม่ถูกต้อง');
       const seg = path.split('/').slice(2); // หลัง /api/
+
+      // GET /api/line/test?pin=88888888  ส่งการ์ดทดสอบเข้า LINE
+      if (m === 'GET' && seg[0] === 'line' && seg[1] === 'test') {
+        const pin = url.searchParams.get('pin') || '';
+        if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
+        const res = await linePush(env, 'ทดสอบแจ้งเตือน Fleet Daily Check', card('#16202E', 'FLEET DAILY CHECK · 2PS', '✅ ทดสอบแจ้งเตือน', [row('ℹ️', 'สถานะ', 'เชื่อม LINE สำเร็จ')], null, origin + '/'));
+        return json(env, res, res.ok ? 200 : 400);
+      }
 
       // GET /api/ping
       if (m === 'GET' && seg[0] === 'ping') return json(env, { ok: true, role, time: new Date().toISOString() });
@@ -132,7 +267,9 @@ export default {
           if (!t || t.id !== id || !ID_RE.test(String(t.carId))) return fail(env, 400, 'ข้อมูลงานซ่อมไม่ถูกต้อง');
           const key = 'data/repairs/' + id + '.json';
           // ทุกคนเปิดงานซ่อมและเปลี่ยนสถานะซ่อมได้ (ไม่ต้องใช้รหัสแอดมิน)
+          const prevT = await getJson(env, key, null);
           await putJson(env, key, t);
+          if (!prevT && env.LINE_TOKEN) ctx.waitUntil(notifyRepair(env, t, origin).catch(() => {}));
           return json(env, { ok: true });
         }
       }
@@ -155,7 +292,10 @@ export default {
           if ((r.trip === 'in' ? 'in' : 'out') !== trip) return fail(env, 400, 'ข้อมูลไม่ตรงกับเที่ยว (ขาไป/ขากลับ)');
           if (typeof r.odo !== 'number' || r.odo < 0) return fail(env, 400, 'เลขไมล์ไม่ถูกต้อง');
           if (String(r.photoOdo || '').startsWith('data:') || String(r.photoBill || '').startsWith('data:')) return fail(env, 400, 'ต้องอัปโหลดรูปก่อน');
-          await putJson(env, 'data/records/' + date.slice(0, 7) + '/' + date + '_' + carId + (trip === 'in' ? '_in' : '') + '.json', r);
+          const rKey = 'data/records/' + date.slice(0, 7) + '/' + date + '_' + carId + (trip === 'in' ? '_in' : '') + '.json';
+          const existed = !!(await env.BUCKET.head(rKey));
+          await putJson(env, rKey, r);
+          if (env.LINE_TOKEN) ctx.waitUntil(notifyRecord(env, r, existed, origin).catch(() => {}));
           return json(env, { ok: true });
         }
       }
