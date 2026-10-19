@@ -250,8 +250,12 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
 .trips button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 8px;border-radius:12px;border:2px solid var(--line2);background:#fff;cursor:pointer}
 .trips button b{font-family:var(--display);font-size:18px}
 .trips button small{font-size:12px;color:var(--mute)}
-.trips button.on{border-color:var(--ink);background:var(--ink);color:#fff}
-.trips button.on small{color:#B8BEC7}
+.trips button.out{border-color:var(--green);background:var(--greenBg);color:var(--greenTx)}
+.trips button.in{border-color:var(--red);background:var(--redBg);color:var(--redTx)}
+.trips button.out small,.trips button.in small{color:inherit;opacity:.85}
+.trips button.out.on{background:var(--green);color:#fff}
+.trips button.in.on{background:var(--red);color:#fff}
+.trips button.on{box-shadow:0 3px 10px rgba(22,32,46,.18)}
 </style>
 </head>
 <body>
@@ -360,7 +364,7 @@ if(window.IN_LINE){
       <div><div class="disp" style="font-size:21px" id="doneTitle">ส่งแล้ว</div><div style="font-size:13px;color:var(--mute)">หัวหน้าฝ่ายยานพาหนะเห็นข้อมูลแล้ว</div></div>
     </div>
     <div class="card" style="padding:4px 16px" id="doneKv"></div>
-    <button id="nextTripBtn" class="btn" onclick="setTrip('in')" hidden>บันทึกขากลับ (ตอนกลับถึงที่จอด)</button>
+    <button id="nextTripBtn" class="btn" style="background:var(--red);border-color:var(--red)" onclick="setTrip('in')" hidden>บันทึกขากลับ (ตอนกลับถึงที่จอด)</button>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn2" style="flex:1" onclick="editToday()">แก้ไขข้อมูลเที่ยวนี้</button><button class="btn2" style="flex:1" onclick="otherCar()">กลับหน้ารถทั้งหมด</button></div>
   </div>
 
@@ -672,7 +676,7 @@ function renderTripBar(hide){
   var t=ymd();
   el.innerHTML='<div class="lab">บันทึกเที่ยวไหน (วันละ 2 ครั้ง)</div><div class="trips">'+['out','in'].map(function(k){
     var r=recOn(S.carId,t,k);
-    return '<button class="'+(S.trip===k?'on':'')+'" onclick="setTrip(\''+k+'\')"><b>'+TRIP[k]+'</b><small>'+(r?'✓ ส่งแล้ว '+r.time:(k==='out'?'ก่อนออกรถ':'กลับถึงที่จอด'))+'</small></button>';
+    return '<button class="'+k+(S.trip===k?' on':'')+'" onclick="setTrip(\''+k+'\')"><b>'+TRIP[k]+'</b><small>'+(r?'✓ ส่งแล้ว '+r.time:(k==='out'?'ก่อนออกรถ':'กลับถึงที่จอด'))+'</small></button>';
   }).join('')+'</div>';
 }
 function goHome(){S={view:'home'};['odoIn','liters','note','drvName','route','dest'].forEach(function(i){document.getElementById(i).value='';});renderDriver();window.scrollTo(0,0);}
