@@ -389,6 +389,8 @@ if(window.IN_LINE){
     <div class="card kpi"><span class="s">ระยะทางรวมวันนี้</span><span class="v" id="kKm"></span><span class="s" id="kKmS"></span></div>
     <div class="card kpi"><span class="s">อัตราสิ้นเปลืองเฉลี่ย 30 วัน</span><span class="v" id="kKml"></span><span class="s">จากลิตรที่เติม ÷ ระยะที่วิ่ง</span></div>
     <div class="card kpi"><span class="s">ต้องตรวจสอบ</span><span class="v" id="kIss" style="color:var(--redTx)"></span><span class="s" id="kIssS"></span></div>
+    <div class="card kpi"><span class="s" id="kMKmL">ระยะทางรวมเดือนนี้</span><span class="v" id="kMKm"></span><span class="s" id="kMKmS"></span></div>
+    <div class="card kpi"><span class="s" id="kMCostL">ค่าน้ำมันเดือนนี้</span><span class="v" id="kMCost"></span><span class="s" id="kMCostS"></span></div>
   </div>
 
   <div class="cols">
@@ -401,6 +403,11 @@ if(window.IN_LINE){
       <div class="tbl"><table>
         <thead><tr><th>ทะเบียน / คนขับ</th><th>ส่งเมื่อ</th><th class="r">เลขไมล์</th><th class="r">วิ่ง (กม.)</th><th>น้ำมัน</th><th class="r">เติม (ล.)</th><th class="r">ราคาน้ำมัน (บ.)</th><th class="r">กม./ล. 30 วัน</th><th>รูป</th><th>สถานะ</th></tr></thead>
         <tbody id="aRows"></tbody>
+      </table></div>
+      <div class="chead" style="border-top:1px solid var(--ground2)"><h2 id="mSumTitle">สรุปเดือนนี้ รายคัน</h2></div>
+      <div class="tbl"><table>
+        <thead><tr><th>ทะเบียน</th><th class="r">เลขไมล์ต้นเดือน</th><th class="r">เลขไมล์ล่าสุด</th><th class="r">วิ่งรวม (กม.)</th><th class="r">เติมรวม (ล.)</th><th class="r">ค่าน้ำมัน (บ.)</th><th class="r">บาท/กม.</th></tr></thead>
+        <tbody id="mRows"></tbody>
       </table></div>
     </div>
     <div class="side">
@@ -870,6 +877,36 @@ function renderHistAdmin(){
       '<td class="mono r">'+lit1(h.used)+'</td><td class="mono r">'+(h.kml?h.kml.toFixed(1):'—')+'</td><td>'+(ph||'—')+'</td></tr>';
   }).join('')||'<tr><td colspan="11" class="empty">ไม่มีข้อมูลเดือนนี้</td></tr>';
 }
+/* สรุปทั้งเดือนของวันที่ที่เลือก: วิ่งรวม = เลขไมล์ล่าสุดในเดือน − เลขไมล์ล่าสุดก่อนเดือน (หรือรายการแรกของเดือน) */
+function monthSum(m){
+  var out=[];
+  DB.cars.forEach(function(c){
+    var all=recsOf(c.id), inM=all.filter(function(r){return r.date.slice(0,7)===m;});
+    if(!inM.length){out.push({c:c,start:null,end:null,km:0,lit:0,cost:0,n:0});return;}
+    var before=all.filter(function(r){return r.date.slice(0,7)<m;}), base=before.length?before[before.length-1]:inM[0];
+    var end=inM[inM.length-1], km=Math.max(0,end.odo-base.odo), lit=0, cost=0, n=0;
+    inM.forEach(function(r){lit+=Number(r.liters||0);if(r.cost){cost+=Number(r.cost);n++;}});
+    out.push({c:c,start:base.odo,end:end.odo,km:km,lit:lit,cost:cost,n:n});
+  });
+  return out;
+}
+function renderMonthSum(d){
+  var m=(d||ymd()).slice(0,7), mt=thDate(m+'-01',{month:'long',year:'numeric'}), l=monthSum(m);
+  var km=0,lit=0,cost=0,n=0,used=0;l.forEach(function(x){km+=x.km;lit+=x.lit;cost+=x.cost;n+=x.n;if(x.km>0)used++;});
+  document.getElementById('kMKmL').textContent='ระยะทางรวม '+mt;
+  document.getElementById('kMKm').innerHTML=fmt(km)+'<small> กม.</small>';
+  document.getElementById('kMKmS').textContent=used?used+' คัน · เฉลี่ย '+fmt(Math.round(km/used))+' กม./คัน':'ยังไม่มีข้อมูลเดือนนี้';
+  document.getElementById('kMCostL').textContent='ค่าน้ำมัน '+mt;
+  document.getElementById('kMCost').innerHTML=fmt(Math.round(cost))+'<small> บาท</small>';
+  document.getElementById('kMCostS').textContent='เติมรวม '+lit1(lit)+' ล. · '+n+' บิล'+(km>0&&cost>0?' · '+(cost/km).toFixed(2)+' บ./กม.':'');
+  document.getElementById('mSumTitle').textContent='สรุป'+mt+' รายคัน';
+  document.getElementById('mRows').innerHTML=l.map(function(x){
+    return '<tr><td><div class="disp" style="font-size:15px">'+esc(x.c.plate)+'</div></td>'+
+      '<td class="mono r">'+(x.start!=null?fmt(x.start):'—')+'</td><td class="mono r">'+(x.end!=null?fmt(x.end):'—')+'</td>'+
+      '<td class="mono r" style="font-weight:600">'+(x.km?fmt(x.km):'—')+'</td><td class="mono r">'+(x.lit?lit1(x.lit):'—')+'</td>'+
+      '<td class="mono r" style="font-weight:600">'+(x.cost?fmt(Math.round(x.cost)):'—')+'</td><td class="mono r">'+(x.km>0&&x.cost>0?(x.cost/x.km).toFixed(2):'—')+'</td></tr>';
+  }).join('')+'<tr style="background:var(--ground)"><td><b>รวม</b></td><td></td><td></td><td class="mono r" style="font-weight:700">'+fmt(km)+'</td><td class="mono r" style="font-weight:700">'+lit1(lit)+'</td><td class="mono r" style="font-weight:700">'+fmt(Math.round(cost))+'</td><td class="mono r">'+(km>0&&cost>0?(cost/km).toFixed(2):'—')+'</td></tr>';
+}
 function kv(a,b){return '<div class="kv"><span>'+a+'</span><span style="font-weight:600">'+b+'</span></div>';}
 function renderRepairBox(){
   var box=document.getElementById('repairBox'), c=carById(S.carId);
@@ -947,6 +984,7 @@ function renderAdmin(){
   var ks=act.map(function(c){return kml30(c.id,d);}).filter(function(x){return x;});
   document.getElementById('kKml').innerHTML=ks.length?(ks.reduce(function(a,b){return a+b;},0)/ks.length).toFixed(1)+'<small> กม./ล.</small>':'—';
   document.getElementById('kIss').innerHTML=(issues+due.length)+'<small> รายการ</small>';
+  renderMonthSum(d);
   document.getElementById('kIssS').textContent='เลขไมล์ '+fOdo+' · น้ำมัน '+fIssue+' · ใกล้ดิว '+due.length;
 
   var B={ok:['ปกติ','p-ok'],issue:['ผิดปกติ','p-bad'],missing:['ยังไม่ส่ง','p-warn'],repair:['รอซ่อม','p-red']};
