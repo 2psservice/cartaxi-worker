@@ -4,7 +4,8 @@
  * โครงสร้างไฟล์ใน R2
  *   data/cars.json                          รายการรถทั้งหมด
  *   data/repairs/<id>.json                  งานซ่อม 1 ไฟล์ต่อ 1 งาน
- *   data/records/<YYYY-MM>/<date>_<carId>.json   เลขไมล์/น้ำมัน 1 ไฟล์ต่อรถ 1 คันต่อวัน
+ *   data/records/<YYYY-MM>/<date>_<carId>.json      เลขไมล์/น้ำมัน ขาไป
+ *   data/records/<YYYY-MM>/<date>_<carId>_in.json   เลขไมล์/น้ำมัน ขากลับ
  *   photos/<YYYY-MM>/<ชื่อไฟล์>.jpg          รูปหน้าปัด / บิล / รูปอาการซ่อม
  *
  * สิทธิ์ (ส่งรหัสใน header X-App-Key)
@@ -143,14 +144,18 @@ export default {
           if (!MONTH_RE.test(month)) return fail(env, 400, 'ระบุเดือนแบบ YYYY-MM');
           return json(env, await readAll(env, 'data/records/' + month + '/'));
         }
-        if (m === 'PUT' && seg.length === 3) {
+        // PUT /api/records/<date>/<carId>      = ขาไป
+        // PUT /api/records/<date>/<carId>/in   = ขากลับ
+        if (m === 'PUT' && (seg.length === 3 || (seg.length === 4 && seg[3] === 'in'))) {
           const [, date, carId] = seg;
+          const trip = seg[3] === 'in' ? 'in' : 'out';
           if (!DATE_RE.test(date) || !ID_RE.test(carId)) return fail(env, 400, 'วันที่หรือรหัสรถไม่ถูกต้อง');
           const r = await readJson(req, env);
           if (!r || r.date !== date || r.carId !== carId) return fail(env, 400, 'ข้อมูลไม่ตรงกับวันที่/รถ');
+          if ((r.trip === 'in' ? 'in' : 'out') !== trip) return fail(env, 400, 'ข้อมูลไม่ตรงกับเที่ยว (ขาไป/ขากลับ)');
           if (typeof r.odo !== 'number' || r.odo < 0) return fail(env, 400, 'เลขไมล์ไม่ถูกต้อง');
           if (String(r.photoOdo || '').startsWith('data:') || String(r.photoBill || '').startsWith('data:')) return fail(env, 400, 'ต้องอัปโหลดรูปก่อน');
-          await putJson(env, 'data/records/' + date.slice(0, 7) + '/' + date + '_' + carId + '.json', r);
+          await putJson(env, 'data/records/' + date.slice(0, 7) + '/' + date + '_' + carId + (trip === 'in' ? '_in' : '') + '.json', r);
           return json(env, { ok: true });
         }
       }

@@ -241,6 +241,12 @@ select.st{font-weight:600;border-radius:999px!important;padding:0 10px!important
 select.st.reported{background:var(--redBg)!important;color:var(--redTx);border-color:var(--red)!important}
 select.st.waiting{background:var(--red)!important;color:#fff;border-color:var(--red)!important}
 select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-color:var(--green)!important}
+.trips{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.trips button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 8px;border-radius:12px;border:2px solid var(--line2);background:#fff;cursor:pointer}
+.trips button b{font-family:var(--display);font-size:18px}
+.trips button small{font-size:12px;color:var(--mute)}
+.trips button.on{border-color:var(--ink);background:var(--ink);color:#fff}
+.trips button.on small{color:#B8BEC7}
 </style>
 </head>
 <body>
@@ -289,6 +295,8 @@ if(window.IN_LINE){
   <div id="carHead" class="card chd"></div>
 
   <div id="repairBox" class="sec"></div>
+
+  <div id="tripBar" class="sec"></div>
 
   <div id="dForm" class="phone" style="gap:22px">
     <div class="sec" id="secName">
@@ -341,7 +349,8 @@ if(window.IN_LINE){
       <div><div class="disp" style="font-size:21px" id="doneTitle">ส่งแล้ว</div><div style="font-size:13px;color:var(--mute)">หัวหน้าฝ่ายยานพาหนะเห็นข้อมูลแล้ว</div></div>
     </div>
     <div class="card" style="padding:4px 16px" id="doneKv"></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn2" style="flex:1" onclick="editToday()">แก้ไขข้อมูลวันนี้</button><button class="btn2" style="flex:1" onclick="otherCar()">กลับหน้ารถทั้งหมด</button></div>
+    <button id="nextTripBtn" class="btn" onclick="setTrip('in')" hidden>บันทึกขากลับ (ตอนกลับถึงที่จอด)</button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn2" style="flex:1" onclick="editToday()">แก้ไขข้อมูลเที่ยวนี้</button><button class="btn2" style="flex:1" onclick="otherCar()">กลับหน้ารถทั้งหมด</button></div>
   </div>
 
   <div class="sec"><div class="row" style="font-size:inherit"><span class="lab">ประวัติรถคันนี้ · 7 ครั้งล่าสุด</span><span id="histSum" class="mono" style="font-size:13px;color:var(--ink2)"></span></div><div id="histList" class="card"></div></div>
@@ -549,9 +558,19 @@ function seed(){
   return {cars:cars,records:recs,repairs:reps,sample:true};
 }
 function carById(id){return DB.cars.find(function(c){return c.id===id;});}
-function recsOf(carId){return DB.records.filter(function(r){return r.carId===carId;}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0;});}
-function prevRec(carId,date){var l=recsOf(carId).filter(function(r){return r.date<date;});return l[l.length-1]||null;}
-function recOn(carId,date){return DB.records.find(function(r){return r.carId===carId&&r.date===date;})||null;}
+/* วันละ 2 ครั้ง: trip 'out' = ขาไป, 'in' = ขากลับ (ข้อมูลเก่าที่ไม่มี trip นับเป็นขาไป) */
+var TRIP={out:'ขาไป',in:'ขากลับ'};
+function tripOf(r){return r&&r.trip==='in'?'in':'out';}
+function tord(date,trip){return date+(trip==='in'?'b':'a');}
+function rkey(r){return r.date+'_'+r.carId+(tripOf(r)==='in'?'_in':'');}
+function recsOf(carId){return DB.records.filter(function(r){return r.carId===carId;}).sort(function(a,b){var x=tord(a.date,tripOf(a)),y=tord(b.date,tripOf(b));return x<y?-1:x>y?1:0;});}
+function prevRec(carId,date,trip){var k=tord(date,trip);var l=recsOf(carId).filter(function(r){return tord(r.date,tripOf(r))<k;});return l[l.length-1]||null;}
+/* ระบุ trip = ได้เที่ยวนั้น · ไม่ระบุ = ได้รายการล่าสุดของวัน (ขากลับก่อน ถ้ามี) */
+function recOn(carId,date,trip){
+  var l=DB.records.filter(function(r){return r.carId===carId&&r.date===date;});
+  if(trip)return l.find(function(r){return tripOf(r)===trip;})||null;
+  return l.find(function(r){return tripOf(r)==='in';})||l[0]||null;
+}
 function kml30(carId,date){
   var from=addDays(date,-30), l=recsOf(carId).filter(function(r){return r.date>=from&&r.date<=date;});
   if(l.length<2)return null;
@@ -560,7 +579,7 @@ function kml30(carId,date){
   return (lit>0&&km>0)?km/lit:null;
 }
 function flags(r){
-  var p=prevRec(r.carId,r.date), f=[];
+  var p=prevRec(r.carId,r.date,tripOf(r)), f=[];
   if(!p)return f;
   var diff=r.odo-p.odo;
   if(diff<0)f.push('odo');
@@ -606,8 +625,9 @@ function renderDriver(){
   renderRepairBox();
   renderHist();
   var selCar=carById(S.carId), locked=selCar&&carState(selCar)==='waiting';
-  var today=S.carId?recOn(S.carId,t):null;
+  var today=S.carId?recOn(S.carId,t,S.trip):null;
   var showDone=!!today&&!S.editing;
+  renderTripBar(locked||!selCar);
   document.getElementById('dForm').hidden=showDone||locked||!selCar;
   document.getElementById('dDone').hidden=!showDone||locked;
   if(locked)return;
@@ -622,9 +642,27 @@ function renderDriver(){
   updateForm();
 }
 function pickCar(id){
-  S={carId:id,fuel:null,photoOdo:null,photoBill:null,editing:false,view:'car'};
+  S={carId:id,fuel:null,photoOdo:null,photoBill:null,editing:false,view:'car',trip:recOn(id,ymd(),'out')?'in':'out'};
   ['odoIn','liters','note','drvName','route'].forEach(function(i){document.getElementById(i).value='';});
   renderDriver();window.scrollTo(0,0);
+}
+function setTrip(tr){
+  if(S.trip===tr&&!S.editing)return;
+  var keep=document.getElementById('drvName').value;
+  S.trip=tr;S.editing=false;S._loaded=false;S.tried=false;S.fuel=null;S.photoOdo=null;S.photoBill=null;
+  ['odoIn','liters','note','route'].forEach(function(i){document.getElementById(i).value='';});
+  document.getElementById('drvName').value=keep;
+  renderDriver();
+  var el=document.getElementById('tripBar');if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function renderTripBar(hide){
+  var el=document.getElementById('tripBar');if(!el)return;
+  el.hidden=!!hide;if(hide)return;
+  var t=ymd();
+  el.innerHTML='<div class="lab">บันทึกเที่ยวไหน (วันละ 2 ครั้ง)</div><div class="trips">'+['out','in'].map(function(k){
+    var r=recOn(S.carId,t,k);
+    return '<button class="'+(S.trip===k?'on':'')+'" onclick="setTrip(\''+k+'\')"><b>'+TRIP[k]+'</b><small>'+(r?'✓ ส่งแล้ว '+r.time:(k==='out'?'ก่อนออกรถ':'กลับถึงที่จอด'))+'</small></button>';
+  }).join('')+'</div>';
 }
 function goHome(){S={view:'home'};['odoIn','liters','note','drvName','route'].forEach(function(i){document.getElementById(i).value='';});renderDriver();window.scrollTo(0,0);}
 /* ระดับน้ำมัน: เกิน 50% (5/8 ขึ้นไป) = เขียว, 3/8–1/2 = เหลือง, 1/4 ลงไป = แดง */
@@ -639,9 +677,9 @@ function miniGauge(f){
 function renderHome(){
   var t=ymd(), ready=0, wait=0, sent=0, act=0;
   document.getElementById('carGrid').innerHTML=DB.cars.map(function(c){
-    var st=carState(c), lr=lastRec(c.id), today=recOn(c.id,t);
+    var st=carState(c), lr=lastRec(c.id), today=recOn(c.id,t), tOut=recOn(c.id,t,'out'), tIn=recOn(c.id,t,'in');
     if(st==='waiting')wait++;else{ready++;act++;if(today)sent++;}
-    var ft=st==='waiting'?'<span style="color:var(--redTx);font-weight:600">หยุดใช้ระหว่างรอซ่อม</span>':today?'<span class="sent">✓ ส่งวันนี้แล้ว '+today.time+'</span>':'<span class="unsent">ยังไม่ส่งวันนี้</span>';
+    var ft=st==='waiting'?'<span style="color:var(--redTx);font-weight:600">หยุดใช้ระหว่างรอซ่อม</span>':today?(tIn?'<span class="sent">✓ ไป '+(tOut?tOut.time:'—')+' · กลับ '+tIn.time+'</span>':'<span class="sent">✓ ขาไป '+tOut.time+'</span> <span class="unsent">· ยังไม่ส่งขากลับ</span>'):'<span class="unsent">ยังไม่ส่งวันนี้</span>';
     var t2=openTicket(c.id);
     return '<button class="vcard'+(st==='waiting'?' wait':st==='reported'?' rep':'')+'" onclick="pickCar(\''+c.id+'\')">'+
       '<div class="vtop"><span class="lp"><b>'+esc(c.plate)+'</b><span>'+esc(c.prov)+'</span></span>'+homeBadge(st)+'</div>'+
@@ -665,12 +703,12 @@ function renderCarHead(){
 }
 function updateForm(){
   var t=ymd(), c=carById(S.carId); if(!c)return;
-  var p=prevRec(c.id,t), raw=document.getElementById('odoIn').value.replace(/[^0-9]/g,'').slice(0,7);
+  var p=prevRec(c.id,t,S.trip), raw=document.getElementById('odoIn').value.replace(/[^0-9]/g,'').slice(0,7);
   document.getElementById('odoIn').value=raw;
   var num=raw?parseInt(raw,10):null, diff=(num!=null&&p)?num-p.odo:null;
   var pad=raw.length>=6?raw.slice(-6):('------'.slice(raw.length)+raw);
   document.getElementById('odoBoxes').innerHTML=pad.split('').map(function(d){return '<div>'+(d==='-'?'':d)+'</div>';}).join('');
-  document.getElementById('lastTxt').textContent=p?('ครั้งก่อน '+fmt(p.odo)+' · '+thDate(p.date,{day:'numeric',month:'short'})):'ยังไม่มีข้อมูลครั้งก่อน';
+  document.getElementById('lastTxt').textContent=p?('ครั้งก่อน '+fmt(p.odo)+' · '+TRIP[tripOf(p)]+' '+thDate(p.date,{day:'numeric',month:'short'})):'ยังไม่มีข้อมูลครั้งก่อน';
   var pill=document.getElementById('diffPill'), bad=diff!=null&&diff<0, big=diff!=null&&diff>MAXKM;
   pill.className='pill '+(diff==null?'p-gray':bad?'p-bad':big?'p-warn':'p-ok');
   pill.textContent=diff==null?'—':bad?'น้อยกว่าครั้งก่อน':'+'+fmt(diff)+' กม.';
@@ -690,11 +728,11 @@ function updateForm(){
   ['secName','secOdo','secFuel','secPhoto'].forEach(function(id){document.getElementById(id).classList.toggle('err',!!S.tried&&miss.some(function(m){return m[0]===id;}));});
   var hint=miss.length?'ยังขาด: '+names.join(', '):(big?'วิ่งเกิน '+MAXKM+' กม. ระบบจะให้หัวหน้าตรวจซ้ำ':'ข้อมูลครบ พร้อมส่ง');
   var hEl=document.getElementById('sendHint'); hEl.classList.toggle('bad',!!S.tried&&miss.length>0);
-  document.getElementById('sendBtn').textContent=S.editing?'บันทึกการแก้ไข':'ส่งข้อมูลวันนี้';
+  document.getElementById('sendBtn').textContent=S.editing?'บันทึกการแก้ไข'+TRIP[S.trip||'out']:'ส่งข้อมูล'+TRIP[S.trip||'out'];
   document.getElementById('sendHint').textContent=hint;
 }
 function missingFields(){
-  var m=[], c=carById(S.carId), p=c?prevRec(c.id,ymd()):null;
+  var m=[], c=carById(S.carId), p=c?prevRec(c.id,ymd(),S.trip):null;
   var raw=document.getElementById('odoIn').value, num=raw?parseInt(raw,10):null;
   if(!document.getElementById('drvName').value.trim())m.push(['secName','ชื่อผู้ขับ']);
   if(num==null)m.push(['secOdo','เลขไมล์']);
@@ -731,21 +769,23 @@ function submitDaily(){
   var miss=missingFields();
   if(miss.length){S.tried=true;updateForm();var el=document.getElementById(miss[0][0]);if(el)el.scrollIntoView({behavior:'smooth',block:'center'});toast('กรอกให้ครบก่อนส่ง: '+miss.map(function(m){return m[1];}).join(', '));return;}
   var t=ymd(), num=parseInt(document.getElementById('odoIn').value,10), lit=parseFloat(document.getElementById('liters').value);
-  var ex=recOn(S.carId,t), now=new Date();
-  var r={id:ex?ex.id:uid(),date:t,time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'),carId:S.carId,
+  var trip=S.trip||'out', ex=recOn(S.carId,t,trip), now=new Date();
+  var r={id:ex?ex.id:uid(),date:t,trip:trip,time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'),carId:S.carId,
     driver:document.getElementById('drvName').value.trim(),odo:num,fuel:S.fuel,liters:(S.photoBill&&!isNaN(lit))?lit:null,
     photoOdo:S.photoOdo,photoBill:S.photoBill,note:document.getElementById('note').value.trim(),route:document.getElementById('route').value.trim()};
   if(ex)DB.records[DB.records.indexOf(ex)]=r;else DB.records.push(r);
   if(!save()&&!cloud()){if(!ex)DB.records.pop();return;}
   queue('record',r);
-  S.editing=false;S._loaded=false;S.tried=false;toast('ส่งข้อมูลแล้ว');renderDriver();
+  S.editing=false;S._loaded=false;S.tried=false;toast('ส่งข้อมูล'+TRIP[trip]+'แล้ว');renderDriver();
 }
 function renderDone(r){
-  var c=carById(r.carId), p=prevRec(r.carId,r.date), diff=p?r.odo-p.odo:null;
-  document.getElementById('doneTitle').textContent='ส่งแล้ว '+r.time+' น.';
+  var c=carById(r.carId), p=prevRec(r.carId,r.date,tripOf(r)), diff=p?r.odo-p.odo:null;
+  document.getElementById('doneTitle').textContent='ส่ง'+TRIP[tripOf(r)]+'แล้ว '+r.time+' น.';
+  var nb=document.getElementById('nextTripBtn');
+  if(nb){var needIn=tripOf(r)==='out'&&!recOn(r.carId,r.date,'in');nb.hidden=!needIn;}
   var fl=flags(r);
   document.getElementById('doneKv').innerHTML=
-    kv('รถ',esc(c.plate+' '+c.prov))+kv('ผู้ขับ',esc(r.driver))+kv('เลขไมล์','<span class="mono">'+fmt(r.odo)+' กม.</span>')+
+    kv('รถ',esc(c.plate+' '+c.prov))+kv('เที่ยว',TRIP[tripOf(r)])+kv('ผู้ขับ',esc(r.driver))+kv('เลขไมล์','<span class="mono">'+fmt(r.odo)+' กม.</span>')+
     (r.route?kv('ไปไหนมา',esc(r.route)):'')+kv('วิ่งจากครั้งก่อน','<span class="mono">'+(diff==null?'—':'+'+fmt(diff)+' กม.')+'</span>')+
     kv('ระดับน้ำมัน','<span class="mono">'+FN[r.fuel]+'</span>')+(r.liters?kv('เติมน้ำมัน','<span class="mono">'+r.liters+' ลิตร</span>'):'')+
     (fl.length?kv('สถานะ','<span class="pill p-warn">รอหัวหน้าตรวจ</span>'):'');
@@ -753,7 +793,7 @@ function renderDone(r){
 function histRows(carId,from,to){
   var c=carById(carId)||{}, tank=c.tank||60;
   return recsOf(carId).filter(function(r){return r.date>=from&&r.date<=to;}).map(function(r){
-    var p=prevRec(carId,r.date), km=p?r.odo-p.odo:null, used=null, kml=null;
+    var p=prevRec(carId,r.date,tripOf(r)), km=p?r.odo-p.odo:null, used=null, kml=null;
     if(p){used=(p.fuel-r.fuel)/8*tank+Number(r.liters||0);if(used<0)used=0;}
     if(used>0&&km>0)kml=km/used;
     return {r:r,p:p,km:km,used:used,kml:kml};
@@ -767,7 +807,7 @@ function renderHist(){
   var km=0,used=0;l.forEach(function(h){if(h.km>0)km+=h.km;if(h.used)used+=h.used;});
   sum.textContent=l.length?'รวม '+fmt(km)+' กม. · ~'+lit1(used)+' ล.':'';
   box.innerHTML=l.map(function(h){var r=h.r;
-    return '<div class="hcard"><div class="t"><span><b>'+thDate(r.date,{weekday:'short',day:'numeric',month:'short'})+'</b> <span style="color:var(--mute);font-size:13px">'+esc(r.driver)+'</span></span>'+
+    return '<div class="hcard"><div class="t"><span><b>'+thDate(r.date,{weekday:'short',day:'numeric',month:'short'})+' · '+TRIP[tripOf(r)]+'</b> <span style="color:var(--mute);font-size:13px">'+esc(r.driver)+'</span></span>'+
       '<span class="pill '+(h.km==null?'p-gray':h.km<0?'p-bad':'p-blue')+'">'+(h.km==null?'ครั้งแรก':(h.km>=0?'+':'')+fmt(h.km)+' กม.')+'</span></div>'+
       '<div class="rt">'+(r.route?esc(r.route):'<span style="color:var(--mute)">ไม่ได้ระบุเส้นทาง</span>')+'</div>'+
       '<div class="m">ไมล์ '+fmt(r.odo)+' · น้ำมัน '+FN[r.fuel]+(r.liters?' · เติม '+r.liters+' ล.':'')+(h.used!=null?' · ใช้ ~'+lit1(h.used)+' ล.':'')+(h.kml?' · '+h.kml.toFixed(1)+' กม./ล.':'')+'</div></div>';
@@ -784,8 +824,9 @@ function renderHistAdmin(){
   var carId=sel.value, m=mEl.value;
   if(cloud()&&m&&!LOADED[m]&&!PULLING)pull(m);
   if(!carId){document.getElementById('hRows').innerHTML='<tr><td colspan="10" class="empty">ยังไม่มีรถ</td></tr>';document.getElementById('hKpis').innerHTML='';return;}
-  var rows=histRows(carId,m+'-01',m+'-31'), km=0,used=0,fill=0,days=0,max=1;
-  rows.forEach(function(h){if(h.km>0){km+=h.km;days++;max=Math.max(max,h.km);}if(h.used)used+=h.used;fill+=Number(h.r.liters||0);});
+  var rows=histRows(carId,m+'-01',m+'-31'), km=0,used=0,fill=0,days=0,max=1,dset={};
+  rows.forEach(function(h){if(h.km>0){km+=h.km;dset[h.r.date]=1;max=Math.max(max,h.km);}if(h.used)used+=h.used;fill+=Number(h.r.liters||0);});
+  days=Object.keys(dset).length;
   var avg=used>0?km/used:null;
   document.getElementById('hKpis').innerHTML=
     '<div><span>วิ่งรวมเดือนนี้</span><b>'+fmt(km)+' กม.</b></div><div><span>วันที่ใช้รถ</span><b>'+days+' วัน</b></div>'+
@@ -793,7 +834,7 @@ function renderHistAdmin(){
     '<div><span>เติมรวม</span><b>'+lit1(fill)+' ล.</b></div><div><span>อัตราสิ้นเปลือง</span><b>'+(avg?avg.toFixed(1):'—')+' กม./ล.</b></div>';
   document.getElementById('hRows').innerHTML=rows.slice().reverse().map(function(h){var r=h.r;
     var ph=(r.photoOdo?'<img class="thumb" src="'+r.photoOdo+'" alt="หน้าปัด" onclick="zoom(this.src)"> ':'')+(r.photoBill?'<img class="thumb" src="'+r.photoBill+'" alt="บิล" onclick="zoom(this.src)">':'');
-    return '<tr><td style="white-space:nowrap">'+thDate(r.date,{weekday:'short',day:'numeric',month:'short'})+'<div class="mono" style="font-size:12px;color:var(--mute)">'+r.time+'</div></td>'+
+    return '<tr><td style="white-space:nowrap">'+thDate(r.date,{weekday:'short',day:'numeric',month:'short'})+'<div class="mono" style="font-size:12px;color:var(--mute)">'+TRIP[tripOf(r)]+' '+r.time+'</div></td>'+
       '<td style="font-size:13px">'+esc(r.driver)+'</td><td style="min-width:200px">'+(r.route?esc(r.route):'<span style="color:var(--mute)">—</span>')+(r.note?'<div style="font-size:12px;color:var(--mute)">'+esc(r.note)+'</div>':'')+'</td>'+
       '<td class="mono r">'+fmt(r.odo)+'</td>'+
       '<td>'+(h.km==null?'<span class="mono" style="color:var(--mute)">ครั้งแรก</span>':'<div class="kmbar"><i style="width:'+Math.max(0,Math.round(h.km/max*90))+'px"></i><span class="mono" style="font-weight:600">'+fmt(h.km)+'</span></div>')+'</td>'+
@@ -864,11 +905,11 @@ function renderAdmin(){
   document.getElementById('aDateTxt').textContent=thDate(d,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   var act=activeCars(), rows=[], sent=0, km=0, issues=0, fIssue=0, fOdo=0;
   DB.cars.forEach(function(c){
-    var r=recOn(c.id,d), p=prevRec(c.id,d), st, fl=[];
+    var r=recOn(c.id,d), ro=recOn(c.id,d,'out'), ri=recOn(c.id,d,'in'), p=prevRec(c.id,d), st, fl=[];
     if(carState(c)==='waiting'){st='repair';}
     else if(!r){st='missing';}
-    else{sent++;fl=flags(r);if(p&&r.odo>=p.odo)km+=r.odo-p.odo;st=fl.length?'issue':'ok';if(fl.length)issues++;if(fl.indexOf('fuel')>-1)fIssue++;if(fl.indexOf('odo')>-1||fl.indexOf('big')>-1)fOdo++;}
-    rows.push({c:c,r:r,p:p,st:st,fl:fl});
+    else{sent++;[ro,ri].forEach(function(x){if(x)flags(x).forEach(function(f){if(fl.indexOf(f)<0)fl.push(f);});});if(p&&r.odo>=p.odo)km+=r.odo-p.odo;st=fl.length?'issue':'ok';if(fl.length)issues++;if(fl.indexOf('fuel')>-1)fIssue++;if(fl.indexOf('odo')>-1||fl.indexOf('big')>-1)fOdo++;}
+    rows.push({c:c,r:r,ro:ro,ri:ri,p:p,st:st,fl:fl});
   });
   var due=dueAlerts(d);
   document.getElementById('kSent').innerHTML=sent+'<small> / '+act.length+' คัน</small>';
@@ -888,14 +929,16 @@ function renderAdmin(){
     var badge=x.st==='issue'?x.fl.map(function(f){return '<span class="pill p-bad" style="font-family:var(--body);font-size:12px">'+FL[f]+'</span>';}).join(' '):'<span class="pill '+B[x.st][1]+'" style="font-family:var(--body);font-size:12px">'+B[x.st][0]+'</span>';
     var cs=carState(c); if(x.st!=='repair'&&(cs==='reported'||cs==='done'))badge+=' '+rsBadge(cs);
     var ph='';
-    if(r&&r.photoOdo)ph+='<img class="thumb" src="'+r.photoOdo+'" alt="หน้าปัด" onclick="zoom(this.src)"> ';
-    if(r&&r.photoBill)ph+='<img class="thumb" src="'+r.photoBill+'" alt="บิล" onclick="zoom(this.src)">';
+    [x.ro,x.ri].forEach(function(y){
+      if(y&&y.photoOdo)ph+='<img class="thumb" src="'+y.photoOdo+'" alt="หน้าปัด'+TRIP[tripOf(y)]+'" title="'+TRIP[tripOf(y)]+'" onclick="zoom(this.src)"> ';
+      if(y&&y.photoBill)ph+='<img class="thumb" src="'+y.photoBill+'" alt="บิล" onclick="zoom(this.src)"> ';
+    });
     return '<tr><td><div class="disp" style="font-size:15px">'+esc(c.plate)+'</div><div style="font-size:12px;color:var(--mute)">'+esc(r?r.driver:c.driver)+(r&&r.note?' · '+esc(r.note):'')+'</div></td>'+
-      '<td class="mono" style="color:var(--ink2)">'+(r?r.time:'—')+'</td>'+
+      '<td class="mono" style="color:var(--ink2);font-size:13px;white-space:nowrap">'+(r?'ไป '+(x.ro?x.ro.time:'—')+'<br>กลับ '+(x.ri?x.ri.time:'<span style="color:var(--amberTx,#a66b00)">ยังไม่ส่ง</span>'):'—')+'</td>'+
       '<td class="mono r">'+(r?fmt(r.odo):(x.p?'<span style="color:var(--mute)">'+fmt(x.p.odo)+'</span>':'—'))+'</td>'+
       '<td class="mono r" style="font-weight:600">'+(r&&x.p?(r.odo-x.p.odo>=0?'+':'')+fmt(r.odo-x.p.odo):'—')+'</td>'+
       '<td>'+(r?'<div class="fb"><div class="t"><i style="width:'+(r.fuel/8*100)+'%;background:'+col+'"></i></div><span class="mono" style="font-size:13px">'+FN[r.fuel]+'</span></div>':'—')+'</td>'+
-      '<td class="mono r">'+(r&&r.liters?r.liters:'—')+'</td>'+
+      '<td class="mono r">'+(function(){var l=(x.ro&&x.ro.liters?Number(x.ro.liters):0)+(x.ri&&x.ri.liters?Number(x.ri.liters):0);return l?l:'—';})()+'</td>'+
       '<td class="mono r">'+(k?k.toFixed(1):'—')+'</td><td>'+(ph||'—')+'</td><td>'+badge+'</td></tr>';
   }).join('')||'<tr><td colspan="9" class="empty">ไม่มีรายการ</td></tr>';
 
@@ -995,11 +1038,11 @@ function saveCars(){readCars();DB.cars=DB.cars.filter(function(c){return c.plate
 function exportXlsx(){
   if(typeof XLSX==='undefined'){toast('โหลดตัวส่งออก Excel ไม่ได้ ต้องต่ออินเทอร์เน็ต');return;}
   var d=document.getElementById('aDate').value||ymd(), m=d.slice(0,7);
-  var l=DB.records.filter(function(r){return r.date.slice(0,7)===m;}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0;});
-  var rows=l.map(function(r){var c=carById(r.carId)||{},p=prevRec(r.carId,r.date),fl=flags(r);
-    return {'วันที่':r.date,'เวลา':r.time,'ทะเบียน':c.plate,'จังหวัด':c.prov,'รุ่น':c.model,'ผู้ขับ':r.driver,'ไปไหนมา':r.route||'','เลขไมล์':r.odo,'วิ่ง (กม.)':p?r.odo-p.odo:'','ระดับน้ำมัน':FN[r.fuel],'เติม (ลิตร)':r.liters||'','มีรูปหน้าปัด':r.photoOdo?'มี':'ไม่มี','มีบิล':r.photoBill?'มี':'ไม่มี','หมายเหตุ':r.note,'ผิดปกติ':fl.join(', ')};});
+  var l=DB.records.filter(function(r){return r.date.slice(0,7)===m;}).sort(function(a,b){var x=tord(a.date,tripOf(a))+a.carId,y=tord(b.date,tripOf(b))+b.carId;return x<y?-1:x>y?1:0;});
+  var rows=l.map(function(r){var c=carById(r.carId)||{},p=prevRec(r.carId,r.date,tripOf(r)),fl=flags(r);
+    return {'วันที่':r.date,'เที่ยว':TRIP[tripOf(r)],'เวลา':r.time,'ทะเบียน':c.plate,'จังหวัด':c.prov,'รุ่น':c.model,'ผู้ขับ':r.driver,'ไปไหนมา':r.route||'','เลขไมล์':r.odo,'วิ่ง (กม.)':p?r.odo-p.odo:'','ระดับน้ำมัน':FN[r.fuel],'เติม (ลิตร)':r.liters||'','มีรูปหน้าปัด':r.photoOdo?'มี':'ไม่มี','มีบิล':r.photoBill?'มี':'ไม่มี','หมายเหตุ':r.note,'ผิดปกติ':fl.join(', ')};});
   var wb=XLSX.utils.book_new(), ws=XLSX.utils.json_to_sheet(rows);
-  ws['!cols']=[{wch:11},{wch:6},{wch:10},{wch:16},{wch:18},{wch:20},{wch:10},{wch:9},{wch:10},{wch:10},{wch:11},{wch:7},{wch:24},{wch:14}];
+  ws['!cols']=[{wch:11},{wch:8},{wch:6},{wch:10},{wch:16},{wch:18},{wch:20},{wch:10},{wch:9},{wch:10},{wch:10},{wch:11},{wch:7},{wch:24},{wch:14}];
   XLSX.utils.book_append_sheet(wb,ws,'Daily '+m);
   var rp=DB.repairs.map(function(t){var c=carById(t.carId)||{};return {'ทะเบียน':c.plate,'รุ่น':c.model,'อาการ':t.issue,'แจ้งโดย':t.by,'แจ้งเมื่อ':dt(t.at),'อู่ / หมายเหตุ':t.shop,'สถานะ':RS[t.status][0],'อัปเดตล่าสุด':dt(t.updatedAt),'ซ่อมเสร็จ':t.doneAt?dt(t.doneAt):''};});
   var ws2=XLSX.utils.json_to_sheet(rp);ws2['!cols']=[{wch:10},{wch:18},{wch:32},{wch:18},{wch:14},{wch:24},{wch:10},{wch:14},{wch:14}];
@@ -1008,9 +1051,14 @@ function exportXlsx(){
 }
 function copyMissing(){
   var d=document.getElementById('aDate').value||ymd();
-  var miss=activeCars().filter(function(c){return !recOn(c.id,d);});
-  if(!miss.length){toast('ส่งครบทุกคันแล้ว');return;}
-  var txt='📋 แจ้งเตือนส่งเลขไมล์ '+thDate(d,{day:'numeric',month:'short'})+'\nยังไม่ส่ง '+miss.length+' คัน:\n'+miss.map(function(c){return '- '+c.plate+(c.driver?' ('+c.driver+')':'');}).join('\n')+'\nกรุณาส่งเลขไมล์ + ระดับน้ำมัน + รูปหน้าปัด ในแอปด้วยครับ';
+  var miss=activeCars().filter(function(c){return !recOn(c.id,d,'out');});
+  var missIn=activeCars().filter(function(c){return recOn(c.id,d,'out')&&!recOn(c.id,d,'in');});
+  if(!miss.length&&!missIn.length){toast('ส่งครบทุกคันแล้ว ทั้งขาไปและขากลับ');return;}
+  var li=function(c){return '- '+c.plate+(c.driver?' ('+c.driver+')':'');};
+  var txt='📋 แจ้งเตือนส่งเลขไมล์ '+thDate(d,{day:'numeric',month:'short'})+
+    (miss.length?'\nยังไม่ส่งขาไป '+miss.length+' คัน:\n'+miss.map(li).join('\n'):'')+
+    (missIn.length?'\nยังไม่ส่งขากลับ '+missIn.length+' คัน:\n'+missIn.map(li).join('\n'):'')+
+    '\nกรุณาส่งเลขไมล์ + ระดับน้ำมัน + รูปหน้าปัด ในแอปด้วยครับ';
   (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(function(){toast('คัดลอกแล้ว นำไปวางใน LINE ได้เลย');},function(){window.prompt('คัดลอกข้อความนี้',txt);});
 }
 var resetArm=false;
@@ -1037,7 +1085,7 @@ async function api(method,path,body,url,key){
 }
 function queue(type,data){
   if(!cloud())return;
-  var id=type==='cars'?'cars':type==='record'?data.date+'_'+data.carId:data.id;
+  var id=type==='cars'?'cars':type==='record'?rkey(data):data.id;
   OUT=OUT.filter(function(o){return !(o.type===type&&o.id===id);});
   OUT.push({type:type,id:id,data:JSON.parse(JSON.stringify(data))});
   saveOut();syncUI();flush();
@@ -1050,7 +1098,7 @@ async function uploadPhoto(dataUrl){
 }
 function patchLocal(o,f,url){
   var list=o.type==='record'?DB.records:o.type==='repair'?DB.repairs:null;if(!list)return;
-  var x=list.find(function(e){return o.type==='record'?(e.date+'_'+e.carId===o.id):e.id===o.id;});
+  var x=list.find(function(e){return o.type==='record'?(rkey(e)===o.id):e.id===o.id;});
   if(x){x[f]=url;save();}
 }
 var FLUSHING=false;
@@ -1064,7 +1112,7 @@ async function flush(){
         var fields=o.type==='record'?['photoOdo','photoBill']:o.type==='repair'?['photo']:[];
         for(var i=0;i<fields.length;i++){var f=fields[i];
           if(o.data[f]&&String(o.data[f]).indexOf('data:')===0){var u=await uploadPhoto(o.data[f]);o.data[f]=u;patchLocal(o,f,u);saveOut();}}
-        if(o.type==='record')await api('PUT','/api/records/'+o.data.date+'/'+o.data.carId,o.data);
+        if(o.type==='record')await api('PUT','/api/records/'+o.data.date+'/'+o.data.carId+(tripOf(o.data)==='in'?'/in':''),o.data);
         else if(o.type==='repair')await api('PUT','/api/repairs/'+o.id,o.data);
         else if(o.type==='cars')await api('PUT','/api/cars',o.data);
       }catch(e){
@@ -1081,7 +1129,7 @@ function applyOut(){
   OUT.forEach(function(o){
     if(o.type==='cars'){DB.cars=JSON.parse(JSON.stringify(o.data));return;}
     var list=o.type==='record'?DB.records:DB.repairs;
-    var i=list.findIndex(function(e){return o.type==='record'?(e.date+'_'+e.carId===o.id):e.id===o.id;});
+    var i=list.findIndex(function(e){return o.type==='record'?(rkey(e)===o.id):e.id===o.id;});
     var v=JSON.parse(JSON.stringify(o.data));if(i>=0)list[i]=v;else list.push(v);
   });
 }

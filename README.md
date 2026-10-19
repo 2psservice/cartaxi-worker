@@ -20,7 +20,8 @@ Cloudflare Worker ที่เก็บเลขไมล์ ระดับน�
 | ที่เก็บ | เนื้อหา |
 |---|---|
 | `data/cars.json` | รายการรถ |
-| `data/records/<YYYY-MM>/<วันที่>_<รหัสรถ>.json` | เลขไมล์/น้ำมัน รถ 1 คัน 1 วัน |
+| `data/records/<YYYY-MM>/<วันที่>_<รหัสรถ>.json` | เลขไมล์/น้ำมัน ขาไป |
+| `data/records/<YYYY-MM>/<วันที่>_<รหัสรถ>_in.json` | เลขไมล์/น้ำมัน ขากลับ |
 | `data/repairs/<รหัสงาน>.json` | งานซ่อม |
 | `photos/<YYYY-MM>/<ชื่อสุ่ม>.jpg` | รูปหน้าปัด บิล รูปอาการซ่อม |
 
@@ -39,7 +40,7 @@ Cloudflare Worker ที่เก็บเลขไมล์ ระดับน�
 |---|---|
 | `GET /api/ping` | ทุกคนที่มีรหัส |
 | `GET /api/cars` · `PUT /api/cars` | ทุกคน |
-| `GET /api/records?month=YYYY-MM` · `PUT /api/records/<date>/<carId>` | ทุกคน |
+| `GET /api/records?month=YYYY-MM` · `PUT /api/records/<date>/<carId>` (ขาไป) · `PUT /api/records/<date>/<carId>/in` (ขากลับ) | ทุกคน |
 | `GET /api/repairs` · `PUT /api/repairs/<id>` | ทุกคน (เปิดงาน + เปลี่ยนสถานะ) |
 | `PUT /api/photos/<YYYY-MM>/<name>.jpg` | ทุกคน (JPEG ≤ 3 MB) |
 | `GET /photos/<YYYY-MM>/<name>.jpg` | สาธารณะ (ชื่อไฟล์สุ่ม) |
