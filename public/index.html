@@ -2,6 +2,21 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
+<script>
+/* เปิดจากแอป LINE → สั่งให้ LINE เปิดลิงก์นี้ในเบราว์เซอร์ของเครื่อง (กล้องใช้ใน LINE ไม่ได้) */
+(function(){
+  var ua=navigator.userAgent||'';
+  if(!/\bLine\//i.test(ua))return;
+  window.IN_LINE=true;
+  try{
+    var u=new URL(location.href);
+    if(u.searchParams.get('openExternalBrowser')!=='1'){
+      u.searchParams.set('openExternalBrowser','1');
+      location.replace(u.toString());
+    }
+  }catch(e){}
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fleet Daily Check</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -229,6 +244,22 @@ select.st.done{background:var(--greenBg)!important;color:var(--greenTx);border-c
 </style>
 </head>
 <body>
+<div id="lineGate" hidden style="position:fixed;inset:0;z-index:99;background:#fff;display:flex;align-items:center;justify-content:center;padding:24px;font-family:inherit">
+  <div style="max-width:360px;text-align:center;display:flex;flex-direction:column;gap:14px">
+    <div style="font-size:20px;font-weight:700">กรุณาเปิดในเบราว์เซอร์</div>
+    <div style="font-size:15px;line-height:1.6;color:#555">แอปนี้ต้องใช้กล้องถ่ายรูป ซึ่งใช้ในหน้าของ LINE ไม่ได้<br>กดปุ่มด้านล่าง หรือกดเมนู <b>⋮</b> / <b>แชร์</b> มุมขวาบน แล้วเลือก <b>"เปิดในเบราว์เซอร์อื่น"</b> (Chrome / Safari)</div>
+    <a id="lineGateBtn" href="#" style="display:block;padding:14px;border-radius:12px;background:#16202e;color:#fff;font-size:16px;font-weight:700;text-decoration:none">เปิดในเบราว์เซอร์</a>
+  </div>
+</div>
+<script>
+if(window.IN_LINE){
+  (function(){
+    var u;try{u=new URL(location.href);u.searchParams.set('openExternalBrowser','1');u=u.toString();}catch(e){u=location.href;}
+    var g=document.getElementById('lineGate');g.hidden=false;g.style.display='flex';
+    document.getElementById('lineGateBtn').href=u;
+  })();
+}
+</script>
 
 <header class="top"><div class="top-in">
   <div class="brand">Fleet Daily Check<small id="todayTxt"></small></div>
