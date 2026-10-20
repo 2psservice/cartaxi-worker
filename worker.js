@@ -446,6 +446,67 @@ async function tryAdvance(env, uid, replyToken, origin) {
   return true;
 }
 
+/* การ์ดสรุปรถทุกคัน (ตอบกลับเมื่อพิมพ์ "สรุปรถ" ในกลุ่ม → ฟรี) */
+async function fleetSummary(env, origin) {
+  const cars = ((await getJson(env, 'data/cars.json', [])) || []).filter((c) => c && c.id);
+  const now = bkkNow();
+  const months = [now.date.slice(0, 7)];
+  const pm = new Date(Date.now() + 7 * 3600e3); pm.setUTCDate(1); pm.setUTCMonth(pm.getUTCMonth() - 1); months.push(pm.toISOString().slice(0, 7));
+  let recs = [];
+  for (const m of months) recs = recs.concat(await readAll(env, 'data/records/' + m + '/'));
+  const reps = await readAll(env, 'data/repairs/');
+  const ord = (r) => r.date + (r.trip === 'in' ? 'b' : 'a') + (r.time || '');
+  const rows = [];
+  for (const c of cars) {
+    const l = recs.filter((r) => r.carId === c.id).sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
+    const last = l[l.length - 1] || null;
+    const tOut = l.find((r) => r.date === now.date && r.trip !== 'in');
+    const tIn = l.find((r) => r.date === now.date && r.trip === 'in');
+    const open = reps.filter((t) => t.carId === c.id && t.status !== 'done').sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+    const fp = fuelPct(last);
+    const col = fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : fp > 50 ? '#1F8A4C' : '#E8A317';
+    const loc = last ? locOf(last) : '';
+    const today = open && open.status === 'waiting' ? '🔧 รอซ่อม' : (tOut ? 'ไป ' + tOut.time : 'ไป –') + ' · ' + (tIn ? 'กลับ ' + tIn.time : 'กลับ –');
+    rows.push({ type: 'separator', margin: 'md' });
+    rows.push({
+      type: 'box', layout: 'horizontal', margin: 'md', spacing: 'md', alignItems: 'center', contents: [
+        { type: 'text', text: String(c.plate || c.id), weight: 'bold', size: 'lg', flex: 2, color: '#111827' },
+        { type: 'box', layout: 'vertical', flex: 5, contents: [
+          { type: 'text', text: last ? nf(last.odo) + ' กม.' : 'ยังไม่มีข้อมูล', size: 'sm', weight: 'bold', color: '#111827' },
+          { type: 'text', text: ((loc ? '📍 ' + loc + ' · ' : '') + (last ? 'ล่าสุด ' + thDay(last.date).replace(/ \d+$/, '') : '')) || '—', size: 'xxs', color: '#6B7280', wrap: true },
+          { type: 'text', text: today, size: 'xxs', color: open && open.status === 'waiting' ? '#C8372D' : (tOut ? '#1F8A4C' : '#B45309') },
+        ] },
+        { type: 'box', layout: 'vertical', flex: 4, spacing: 'xs', contents: [
+          { type: 'text', text: fp == null ? '—' : fp + '%', size: 'sm', weight: 'bold', align: 'end', color: col },
+          { type: 'box', layout: 'vertical', height: '8px', backgroundColor: '#E5E7EB', cornerRadius: '4px', contents: [
+            { type: 'box', layout: 'vertical', height: '8px', width: Math.max(0, Math.min(100, fp || 0)) + '%', backgroundColor: col, cornerRadius: '4px', contents: [] },
+          ] },
+        ] },
+      ],
+    });
+  }
+  const sent = cars.filter((c) => recs.some((r) => r.carId === c.id && r.date === now.date)).length;
+  const bubble = {
+    type: 'bubble', size: 'giga',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#16202E', paddingAll: '18px', contents: [
+      { type: 'text', text: 'FLEET DAILY CHECK · 2PS', size: 'sm', color: '#E8A317', weight: 'bold' },
+      { type: 'text', text: '🚗 สรุปรถทุกคัน', size: 'xl', color: '#FFFFFF', weight: 'bold', margin: 'sm' },
+      { type: 'text', text: thDay(now.date) + ' · ' + now.time + ' น. · ส่งวันนี้ ' + sent + '/' + cars.length + ' คัน', size: 'xs', color: '#D5DAE1', margin: 'sm' },
+    ] },
+    body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: [
+      { type: 'box', layout: 'horizontal', spacing: 'md', contents: [
+        { type: 'text', text: 'รถ', size: 'xxs', color: '#6B7280', flex: 2 },
+        { type: 'text', text: 'เลขไมล์ล่าสุด / อยู่ที่ / วันนี้', size: 'xxs', color: '#6B7280', flex: 5 },
+        { type: 'text', text: 'น้ำมัน', size: 'xxs', color: '#6B7280', flex: 4, align: 'end' },
+      ] },
+    ].concat(rows) },
+    footer: { type: 'box', layout: 'vertical', contents: [
+      { type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดแอป Fleet Daily Check', uri: origin + '/' } },
+    ] },
+  };
+  return { type: 'flex', altText: '🚗 สรุปรถทุกคัน · ส่งวันนี้ ' + sent + '/' + cars.length + ' คัน', contents: bubble };
+}
+
 async function handleLineEvent(env, ev, origin) {
   const src = ev.source || {};
   if (src.type === 'group' && src.groupId) {
@@ -470,6 +531,10 @@ async function handleLineEvent(env, ev, origin) {
     return;
   }
   if (msg.type !== 'text') return;
+  if (/^\s*(สรุป|สรุปรถ|สถานะรถ|รถทั้งหมด|สรุปน้ำมัน|สรุปไมล์)\s*$/.test(msg.text || '')) {
+    await lineReply(env, ev.replyToken, [await fleetSummary(env, origin)]);
+    return;
+  }
   const cars = await getJson(env, 'data/cars.json', []);
   const fm = /ค่าน้ำมัน/.test(msg.text || '') ? null : String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%/);
   if (fm) {   // แก้ระดับน้ำมัน เช่น "02 น้ำมัน 60%" (มาจากปุ่มด่วน)
@@ -581,6 +646,18 @@ export default {
           out.push({ key: o.key, saved: { odo: r.odo, fuel: r.fuel, fs: r.fs }, read: res });
         }
         return json(env, out);
+      }
+
+      // GET /api/line/summary?pin=88888888  ดูข้อมูลการ์ดสรุปรถทุกคัน (JSON)
+      if (m === 'GET' && seg[0] === 'line' && seg[1] === 'summary') {
+        const pin = url.searchParams.get('pin') || '';
+        if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
+        const msgS = await fleetSummary(env, origin);
+        if (url.searchParams.get('validate')) {
+          const v = await lineApi(env, '/v2/bot/message/validate/reply', { messages: [msgS] });
+          return json(env, { validate: v.status, detail: v.ok ? 'ok' : await v.text(), message: msgS });
+        }
+        return json(env, msgS);
       }
 
       // GET /api/line/test?pin=88888888  ส่งการ์ดทดสอบเข้า LINE
