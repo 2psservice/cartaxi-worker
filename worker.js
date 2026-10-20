@@ -448,7 +448,7 @@ async function tryComplete(env, uid, replyToken, origin) {
   if (!bill && pf != null && odo >= prev.odo) {   // เทียบกับที่ควรเหลือ (น้ำมันครั้งก่อน − ระยะที่วิ่ง × อัตราใช้ของรถคันนี้)
     const exp = Math.max(0, Math.min(100, Math.round((pf - (odo - prev.odo) * fuelRate(recs)) / 10) * 10));
     if (aiFuel == null) { fuelPctV = exp; fuelWarn = 'AI อ่านระดับน้ำมันไม่ได้ ใส่ค่าประมาณจากระยะทาง ' + exp + '% ไว้ก่อน'; }
-    else if (Math.abs(aiFuel - exp) > 30) { fuelPctV = exp; fuelWarn = 'AI อ่านได้ ' + aiFuel + '% แต่จากระยะทางควรเหลือราว ' + exp + '% จึงบันทึก ' + exp + '% ไว้ก่อน'; }
+    else if (Math.abs(aiFuel - exp) > 20) { fuelPctV = exp; fuelWarn = 'AI อ่านได้ ' + aiFuel + '% แต่จากระยะทางควรเหลือราว ' + exp + '% จึงบันทึก ' + exp + '% ไว้ก่อน'; }
   }
   const r = {
     id: rid(), date: now.date, trip, time: now.time, carId: car.id, driver: u.car.name || 'คนขับ',
