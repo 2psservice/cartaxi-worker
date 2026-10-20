@@ -684,7 +684,7 @@ export default {
         const imgs = (url.searchParams.get('imgs') || 'd1,d2,d3,d4,d5,d6').split(',');
         const out = await Promise.all(imgs.map(async (n) => {
           try {
-            const rr = await fetch(origin + '/t/' + n + '.jpg');
+            const rr = env.ASSETS ? await env.ASSETS.fetch(new Request(origin + '/t/' + n + '.jpg')) : await fetch(origin + '/t/' + n + '.jpg');
             const bytes = new Uint8Array(await rr.arrayBuffer());
             if (mk === 'pipeline') return { img: n, res: await readDash(env, bytes) };
             const model = MODELS[mk];

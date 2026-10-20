@@ -5,6 +5,7 @@ compatibility_date = "2025-09-01"
 # หน้าแอป (public/index.html) เปิดได้ที่ https://<worker>/  ส่วน /api และ /photos ให้ Worker จัดการ
 [assets]
 directory = "./public"
+binding = "ASSETS"
 
 # ผูก R2 bucket "cartaxi" ให้ Worker ใช้งานผ่านตัวแปร env.BUCKET
 [[r2_buckets]]
