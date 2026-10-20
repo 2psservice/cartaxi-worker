@@ -432,6 +432,19 @@ async function tryComplete(env, uid, replyToken, origin) {
     }
   }
   const plate = 'รถ ' + (car.plate || car.id);
+  // ไม่บันทึกซ้ำ: รูปที่ส่งเคยใช้บันทึกแล้วทั้งหมด หรือเลขไมล์เท่ากับครั้งล่าสุด (และไม่มีบิลเติมน้ำมันใหม่)
+  const lastRec = recs[recs.length - 1] || null;
+  const used = u.imgs.filter((x) => x.kind === 'dash' || x.kind === 'bill' || x.odo != null);
+  const allDup = used.length && used.every((x) => x.dupOf);
+  const sameOdo = lastRec && odo && odo === lastRec.odo && !(bill && !bill.dupOf);
+  if (allDup || sameOdo) {
+    await env.BUCKET.delete(claimKey);
+    await clearUser(env, uid);
+    const ref = allDup ? used[0].dupOf : { date: lastRec.date, trip: lastRec.trip, time: lastRec.time };
+    await lineReply(env, replyToken, [textMsg('ℹ️ ' + plate + ': ' + (allDup ? 'รูปนี้เคยส่งบันทึกแล้ว' : 'เลขไมล์ ' + nf(odo) + ' เท่ากับครั้งล่าสุด') +
+      (ref && ref.date ? ' (' + (ref.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ' ' + thDay(ref.date) + (ref.time ? ' ' + ref.time + ' น.' : '') + ')' : '') + '\nไม่บันทึกซ้ำ ไป-กลับไม่เปลี่ยน')]);
+    return true;
+  }
   const carNo = String(car.plate || car.id).replace(/\D/g, '') || String(car.plate);
   const bad = !odo ? 'อ่านเลขไมล์จากรูปไม่ได้'
     : prev && odo < prev.odo ? 'เลขไมล์ที่อ่านได้ ' + nf(odo) + ' น้อยกว่าครั้งก่อน (' + nf(prev.odo) + ')'
@@ -460,6 +473,7 @@ async function tryComplete(env, uid, replyToken, origin) {
   };
   const key = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + car.id + (trip === 'in' ? '_in' : '') + '.json';
   await putJson(env, key, r);
+  for (const x of u.imgs) if (x.hash) await putJson(env, 'data/line/hash/' + x.hash + '.json', { key, date: r.date, trip: r.trip, time: r.time, carId: car.id });
   await clearUser(env, uid);
 
   const isIn = trip === 'in', fp = fuelPct(r);
@@ -639,8 +653,11 @@ async function handleLineEvent(env, ev, origin) {
     if (!res.ok) { await env.BUCKET.delete(ikey); return; }
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.byteLength > 6 * 1024 * 1024) { await env.BUCKET.delete(ikey); return; }
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    let dupOf = await getJson(env, 'data/line/hash/' + hash + '.json', null);   // รูปนี้เคยใช้บันทึกแล้ว? (ถ้ายกเลิกเที่ยวนั้นไปแล้ว ถือว่าไม่ซ้ำ)
+    if (dupOf && !(await env.BUCKET.head(dupOf.key))) dupOf = null;
     const [photo, ocr] = await Promise.all([savePhoto(env, bytes), readDash(env, bytes)]);
-    await putJson(env, ikey, { at: Date.now(), set, photo, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost, amount: ocr.amount });
+    await putJson(env, ikey, { at: Date.now(), set, photo, hash, dupOf, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost, amount: ocr.amount });
     if (await tryAdvance(env, uid, ev.replyToken, origin)) return;
     await tryComplete(env, uid, ev.replyToken, origin);
     return;

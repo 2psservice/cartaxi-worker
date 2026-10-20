@@ -758,7 +758,8 @@ function updateForm(){
   document.getElementById('lastTxt').textContent=p?('ครั้งก่อน '+fmt(p.odo)+' · '+TRIP[tripOf(p)]+' '+thDate(p.date,{day:'numeric',month:'short'})):'ยังไม่มีข้อมูลครั้งก่อน';
   var pill=document.getElementById('diffPill'), bad=diff!=null&&diff<0, big=diff!=null&&diff>MAXKM;
   pill.className='pill '+(diff==null?'p-gray':bad?'p-bad':big?'p-warn':'p-ok');
-  pill.textContent=diff==null?'—':bad?'น้อยกว่าครั้งก่อน':'+'+fmt(diff)+' กม.';
+  if(diff===0)pill.className='pill p-warn';
+  pill.textContent=diff==null?'—':bad?'น้อยกว่าครั้งก่อน':diff===0?'เท่าครั้งก่อน':'+'+fmt(diff)+' กม.';
   // gauge
   var segs='';for(var i=1;i<=10;i++)segs+='<button aria-label="น้ำมัน '+FN[i]+'" class="'+(S.fuel!=null&&i<=S.fuel?'on':'')+'" onclick="setFuel('+i+')"></button>';
   document.getElementById('segs').innerHTML=segs;
@@ -784,6 +785,7 @@ function missingFields(){
   if(!document.getElementById('drvName').value.trim())m.push(['secName','ชื่อผู้ขับ']);
   if(num==null)m.push(['secOdo','เลขไมล์']);
   else if(p&&num<p.odo)m.push(['secOdo','เลขไมล์ต้องไม่น้อยกว่า '+fmt(p.odo)]);
+  else if(p&&num===p.odo&&!S.photoBill)m.push(['secOdo','เลขไมล์เท่ากับครั้งก่อน ('+fmt(p.odo)+') ไม่ต้องส่งซ้ำ']);
   if(S.fuel==null)m.push(['secFuel','ระดับน้ำมัน']);
   if(!S.photoOdo)m.push(['secPhoto','รูปหน้าปัดเลขไมล์']);
   if(S.photoBill){var cs=parseFloat(String(document.getElementById('cost').value).replace(/,/g,''));if(isNaN(cs)||cs<=0)m.push(['secPhoto','ราคาน้ำมันตามบิล']);}
