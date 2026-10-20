@@ -674,6 +674,29 @@ export default {
         });
       }
 
+      // GET /api/line/ocrlab?pin=88888888&model=scout|mistral|llama32&imgs=d1,d2&p=<prompt>  ทดลองอ่านรูปตัวอย่าง /t/*.jpg
+      if (m === 'GET' && seg[0] === 'line' && seg[1] === 'ocrlab') {
+        const pin = url.searchParams.get('pin') || '';
+        if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
+        const MODELS = { scout: '@cf/meta/llama-4-scout-17b-16e-instruct', mistral: '@cf/mistralai/mistral-small-3.1-24b-instruct', llama32: VISION_MODEL, gemma: '@cf/google/gemma-3-12b-it' };
+        const mk = url.searchParams.get('model') || 'pipeline';
+        const prompt = url.searchParams.get('p') || (url.searchParams.get('fuel') ? FUEL_PROMPT : DASH_PROMPT);
+        const imgs = (url.searchParams.get('imgs') || 'd1,d2,d3,d4,d5,d6').split(',');
+        const out = await Promise.all(imgs.map(async (n) => {
+          try {
+            const rr = await fetch(origin + '/t/' + n + '.jpg');
+            const bytes = new Uint8Array(await rr.arrayBuffer());
+            if (mk === 'pipeline') return { img: n, res: await readDash(env, bytes) };
+            const model = MODELS[mk];
+            const input = mk === 'llama32' ? { prompt, image: [...bytes], max_tokens: 600, temperature: 0 }
+              : { messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64(bytes) } }] }], max_tokens: 600, temperature: 0 };
+            const o = await aiRun(env, model, input);
+            return { img: n, raw: typeof o === 'object' && o && 'response' in o ? o.response : o };
+          } catch (e) { return { img: n, err: String(e && e.message || e).slice(0, 200) }; }
+        }));
+        return json(env, out);
+      }
+
       // GET /api/line/ocrtest?pin=88888888  ลองอ่านรูปหน้าปัดของรายการวันนี้ใหม่ (ไม่บันทึกอะไร)
       if (m === 'GET' && seg[0] === 'line' && seg[1] === 'ocrtest') {
         const pin = url.searchParams.get('pin') || '';
