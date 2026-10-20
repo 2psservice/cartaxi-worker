@@ -265,26 +265,56 @@ async function carRecords(env, carId) {
   return out.sort((a, b) => (ord(a) < ord(b) ? -1 : ord(a) > ord(b) ? 1 : 0));
 }
 
-async function readDash(env, bytes) {
-  if (!env.AI) return { odo: null, fuel: null, err: 'ยังไม่ได้ผูก Workers AI' };
-  const prompt = 'This is a photo of a car instrument cluster. Read two things:\n' +
-    '1) the ODOMETER total distance in km (labelled ODO, or the long counter on an analog speedometer). Ignore TRIP meters, speed and time.\n' +
-    '2) the FUEL gauge level from E (0%) to F (100%), rounded to the nearest 10.\n' +
-    'Reply with ONLY compact JSON: {"odo":<integer or null>,"fuel":<integer 0-100 or null>,"sure":<true|false>}';
-  const input = { messages: [{ role: 'user', content: prompt }], image: [...bytes], max_tokens: 80, temperature: 0 };
-  let out;
-  try { out = await env.AI.run(VISION_MODEL, input); }
+function b64(bytes) {
+  let bin = ''; const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+const DASH_PROMPT =
+  'You are reading a photo of a car instrument cluster (Thai pickup trucks / vans).\n' +
+  'Task 1 - ODOMETER: the total distance in km. On digital clusters it is labelled ODO (ignore TRIP A/B, range, time, temperature). ' +
+  'On analog clusters it is the 6-digit rolling counter inside the speedometer (ignore the smaller trip counter). Return the full integer.\n' +
+  'Task 2 - FUEL LEVEL as percent: find the fuel gauge (fuel-pump icon, letters E and F). ' +
+  'Analog needle: E=0, 1/4=25, 1/2=50, 3/4=75, F=100, estimate where the needle points. ' +
+  'Digital bars: lit bars / total bars x 100. Round to the nearest 10. ' +
+  'Return null only if no fuel gauge is visible at all.\n' +
+  'Answer with ONLY compact JSON and nothing else: {"odo":<integer or null>,"fuel":<integer 0-100 or null>}';
+async function aiRun(env, model, input) {
+  try { return await env.AI.run(model, input); }
   catch (e) {
-    if (/agree/i.test(String(e && e.message))) { await env.AI.run(VISION_MODEL, { prompt: 'agree' }); out = await env.AI.run(VISION_MODEL, input); }
-    else return { odo: null, fuel: null, err: String(e && e.message || e) };
+    if (/agree/i.test(String(e && e.message))) { await env.AI.run(model, { prompt: 'agree' }); return env.AI.run(model, input); }
+    throw e;
   }
-  const txt = String(out && (out.response ?? out.result ?? out) || '');
-  const m = txt.match(/\{[\s\S]*?\}/);
+}
+function parseDash(out) {
+  const txt = String(out && (out.response ?? out.result ?? (typeof out === 'string' ? out : JSON.stringify(out))) || '');
+  const m = txt.match(/\{[^{}]*\}/);
   let j = {}; try { j = m ? JSON.parse(m[0]) : {}; } catch {}
   const odo = Number.isFinite(Number(j.odo)) && Number(j.odo) > 0 ? Math.round(Number(j.odo)) : null;
-  let fuel = Number.isFinite(Number(j.fuel)) ? Math.round(Number(j.fuel) / 10) * 10 : null;
-  if (fuel != null) fuel = Math.max(0, Math.min(100, fuel));
-  return { odo, fuel, sure: j.sure !== false, raw: txt.slice(0, 200) };
+  let fuel = j.fuel == null || j.fuel === '' || !Number.isFinite(Number(j.fuel)) ? null : Math.max(0, Math.min(100, Math.round(Number(j.fuel) / 10) * 10));
+  return { odo, fuel, raw: txt.slice(0, 160) };
+}
+/* อ่านด้วยโมเดลที่เก่งกว่าก่อน (Llama 4 Scout) ถ้าไม่ได้ค่อยใช้ Llama 3.2 Vision แล้วเอาค่าที่อ่านได้มารวมกัน */
+async function readDash(env, bytes) {
+  if (!env.AI) return { odo: null, fuel: null, err: 'ยังไม่ได้ผูก Workers AI' };
+  const url = 'data:image/jpeg;base64,' + b64(bytes);
+  const tries = [
+    ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 }],
+    ['@cf/google/gemma-3-12b-it', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 }],
+    [VISION_MODEL, { messages: [{ role: 'user', content: DASH_PROMPT }], image: [...bytes], max_tokens: 60, temperature: 0 }],
+  ];
+  const res = { odo: null, fuel: null, log: [] };
+  for (const [model, input] of tries) {
+    if (res.odo != null && res.fuel != null) break;
+    try {
+      const r = parseDash(await aiRun(env, model, input));
+      res.log.push(model.split('/').pop() + ': ' + r.raw);
+      if (res.odo == null && r.odo != null) res.odo = r.odo;
+      if (res.fuel == null && r.fuel != null) res.fuel = r.fuel;
+    } catch (e) { res.log.push(model.split('/').pop() + ' ERR ' + String(e && e.message || e).slice(0, 120)); }
+  }
+  await putJson(env, 'data/line/ocr.json', { at: new Date().toISOString(), odo: res.odo, fuel: res.fuel, log: res.log }).catch(() => {});
+  return res;
 }
 
 async function savePhoto(env, bytes) {
@@ -342,7 +372,11 @@ async function tryComplete(env, pend, replyToken, origin) {
   rows.push({ type: 'text', text: (pend.typedOdo ? 'เลขไมล์จากที่พิมพ์' : 'อ่านจากรูปอัตโนมัติ') + ' · ถ้าผิดกด "เปิดแอป" แล้วแก้ไขได้', size: 'xs', color: '#6B7280', wrap: true, margin: 'md' });
   const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate;
   const bubble = card(isIn ? '#C8372D' : '#1F8A4C', 'FLEET DAILY CHECK · 2PS', title, rows, httpsUrl(r.photoOdo), origin + '/');
-  await lineReply(env, replyToken, [{ type: 'flex', altText: title + ' · ไมล์ ' + nf(r.odo) + ' · น้ำมัน ' + (fp == null ? '—' : fp + '%'), contents: bubble }]);
+  const carNo = String(car.plate || car.id).replace(/\D/g, '') || String(car.plate);
+  const qr = { items: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => ({ type: 'action', action: { type: 'message', label: v + '%', text: carNo + ' น้ำมัน ' + v + '%' } })) };
+  const msgs = [{ type: 'flex', altText: title + ' · ไมล์ ' + nf(r.odo) + ' · น้ำมัน ' + (fp == null ? '—' : fp + '%'), contents: bubble }];
+  msgs.push({ type: 'text', text: fp == null ? '⛽ อ่านระดับน้ำมันจากรูปไม่ได้ แตะเลือกด้านล่างได้เลย' : '⛽ ระดับน้ำมันไม่ตรง? แตะเลือกค่าที่ถูกด้านล่าง', quickReply: qr });
+  await lineReply(env, replyToken, msgs);
   return true;
 }
 
@@ -376,6 +410,20 @@ async function handleLineEvent(env, ev, origin) {
   }
   if (msg.type === 'text') {
     const cars = await getJson(env, 'data/cars.json', []);
+    const fm = String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%?/);
+    if (fm) {   // แก้ระดับน้ำมัน เช่น "02 น้ำมัน 60%" (มาจากปุ่มด่วน)
+      const pc = parseCarText(msg.text.replace(fm[0], ''), cars);
+      const v = Math.max(0, Math.min(100, Math.round(parseInt(fm[1], 10) / 10) * 10));
+      if (!pc) return;
+      const now = bkkNow(), base = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + pc.car.id;
+      let key = base + '_in.json', rec = await getJson(env, key, null);
+      if (!rec) { key = base + '.json'; rec = await getJson(env, key, null); }
+      if (!rec) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการวันนี้ของรถ ' + pc.car.plate + ' ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
+      rec.fuel = v / 10; rec.fs = 10;
+      await putJson(env, key, rec);
+      await lineReply(env, ev.replyToken, [textMsg('✅ รถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') น้ำมัน ' + v + '% บันทึกแล้ว')]);
+      return;
+    }
     const p = parseCarText(msg.text, cars);
     if (!p) return;
     if (pend && pend.processing) {   // รูปกำลังถูกอ่านอยู่ ฝากเบอร์รถไว้ ให้ฝั่งรูปบันทึกและตอบกลับ
@@ -450,7 +498,7 @@ export default {
           hasToken: !!env.LINE_TOKEN, hasSecret: !!env.LINE_SECRET, hasAI: !!env.AI,
           bot: bot && { name: bot.displayName, basicId: bot.basicId, chatMode: bot.chatMode, error: bot.error },
           webhook: wh, target: await getJson(env, 'data/line/target.json', null),
-          lastWebhook: await getJson(env, 'data/line/last.json', null), lastError: await getJson(env, 'data/line/error.json', null),
+          lastWebhook: await getJson(env, 'data/line/last.json', null), lastError: await getJson(env, 'data/line/error.json', null), lastOcr: await getJson(env, 'data/line/ocr.json', null),
           pending: await Promise.all(pend.objects.map((o) => getJson(env, o.key, null).then((x) => x && { name: x.name, at: new Date(x.at).toISOString(), carId: x.carId, typedOdo: x.typedOdo, hasPhoto: !!x.photo, processing: !!x.processing, waitOdo: !!x.waitOdo, ocr: x.ocr }))),
           cars: ((await getJson(env, 'data/cars.json', [])) || []).map((c) => ({ id: c.id, plate: c.plate })),
         });
