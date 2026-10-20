@@ -451,7 +451,8 @@ export default {
           bot: bot && { name: bot.displayName, basicId: bot.basicId, chatMode: bot.chatMode, error: bot.error },
           webhook: wh, target: await getJson(env, 'data/line/target.json', null),
           lastWebhook: await getJson(env, 'data/line/last.json', null), lastError: await getJson(env, 'data/line/error.json', null),
-          pending: pend.objects.map((o) => o.key),
+          pending: await Promise.all(pend.objects.map((o) => getJson(env, o.key, null).then((x) => x && { name: x.name, at: new Date(x.at).toISOString(), carId: x.carId, typedOdo: x.typedOdo, hasPhoto: !!x.photo, processing: !!x.processing, waitOdo: !!x.waitOdo, ocr: x.ocr }))),
+          cars: ((await getJson(env, 'data/cars.json', [])) || []).map((c) => ({ id: c.id, plate: c.plate })),
         });
       }
 
