@@ -218,6 +218,11 @@ async function lineReply(env, token, messages) {
   if (!token) return;
   const r = await lineApi(env, '/v2/bot/message/reply', { replyToken: token, messages: messages.slice(0, 5) });
   if (!r.ok) await putJson(env, 'data/line/error.json', { at: new Date().toISOString(), error: 'reply ' + r.status + ' ' + (await r.text()).slice(0, 400) }).catch(() => {});
+  try {   // เก็บ 10 ข้อความตอบล่าสุดไว้ดูในหน้าสถานะ
+    const log = (await getJson(env, 'data/line/replies.json', [])) || [];
+    log.unshift({ at: new Date().toISOString(), ok: r.ok, text: messages.map((m) => m.text || m.altText || m.type).join(' | ').slice(0, 300) });
+    await putJson(env, 'data/line/replies.json', log.slice(0, 10));
+  } catch (e) {}
 }
 function textMsg(t) { return { type: 'text', text: String(t).slice(0, 4900) }; }
 async function displayName(env, src) {
@@ -814,6 +819,7 @@ export default {
           bot: bot && { name: bot.displayName, basicId: bot.basicId, chatMode: bot.chatMode, error: bot.error },
           webhook: wh, target: await getJson(env, 'data/line/target.json', null),
           lastWebhook: await getJson(env, 'data/line/last.json', null), lastError: await getJson(env, 'data/line/error.json', null), lastOcr: await getJson(env, 'data/line/ocr.json', null),
+          replies: await getJson(env, 'data/line/replies.json', []),
           pending: await Promise.all((await env.BUCKET.list({ prefix: 'data/line/p/', limit: 50 })).objects.map((o) => getJson(env, o.key, null).then((x) => ({ key: o.key.split('/').slice(-1)[0], ...(x || {}), at: x && x.at ? new Date(x.at).toISOString() : null })))),
           cars: ((await getJson(env, 'data/cars.json', [])) || []).map((c) => ({ id: c.id, plate: c.plate })),
         });
