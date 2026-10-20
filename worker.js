@@ -286,11 +286,13 @@ const DASH_PROMPT =
   '- "other": anything else.\n' +
   'If "dash": ODOMETER = total distance in km. Digital clusters: the value labelled ODO (ignore TRIP A/B, range, clock, temperature). ' +
   'Analog clusters: the 6-digit rolling counter inside the speedometer (ignore the smaller trip counter). ' +
-  'FUEL = fuel gauge (fuel-pump icon, E and F). Analog needle: E=0, 1/4=25, 1/2=50, 3/4=75, F=100, estimate where the needle points. ' +
-  'Digital bars: lit bars / total bars x 100. Round to nearest 10. null only if no fuel gauge is visible.\n' +
+  'FUEL = fuel gauge (fuel-pump icon; ends marked E/F or 0/1). Analog needle: E=0, 1/4=25, 1/2=50, 3/4=75, F=100, estimate where the needle points. ' +
+  'Segmented LCD bar (a column of dark blocks inside a bracket from 0/E at the bottom to 1/F at the top): unlit blocks are INVISIBLE, so a short stack of blocks near 0 is NOT empty. ' +
+  'Count the dark blocks (fuel_bars) and estimate how many blocks would fit from 0 to 1 (fuel_total, usually 8; a tick at the middle of the bracket = half). fuel = fuel_bars / fuel_total x 100. ' +
+  'fuel is 0 only when no block at all is lit. Round to nearest 10. null only if no fuel gauge is visible.\n' +
   'If "bill": LITERS = fuel quantity in litres (the Quantity / จำนวน / ลิตร column), COST = total amount paid in baht (NET TOTAL / จำนวนเงินรวม / Amount).\n' +
   'If "slip": AMOUNT = the transferred amount in baht (จำนวนเงิน).\n' +
-  'Answer with ONLY compact JSON and nothing else: {"kind":"dash|bill|slip|other","odo":<int or null>,"fuel":<int 0-100 or null>,"liters":<number or null>,"cost":<number or null>,"amount":<number or null>}';
+  'Answer with ONLY compact JSON and nothing else: {"kind":"dash|bill|slip|other","odo":<int or null>,"fuel_bars":<int or null>,"fuel_total":<int or null>,"fuel":<int 0-100 or null>,"liters":<number or null>,"cost":<number or null>,"amount":<number or null>}';
 function num(v) { if (v == null || v === '') return null; const n = Number(String(v).replace(/[^\d.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; }
 function parseDash(out) {
   let v = out && typeof out === 'object' && 'response' in out ? out.response : out;
@@ -305,7 +307,9 @@ function parseDash(out) {
   const kind = ['dash', 'bill', 'slip', 'other'].includes(String(j.kind)) ? String(j.kind) : null;
   const odo = num(j.odo) != null ? Math.round(num(j.odo)) : null;
   const fr = j.fuel == null || j.fuel === '' ? null : Number(String(j.fuel).replace(/[^\d.]/g, ''));
-  const fuel = fr == null || !Number.isFinite(fr) ? null : Math.max(0, Math.min(100, Math.round(fr / 10) * 10));
+  let fuel = fr == null || !Number.isFinite(fr) ? null : Math.max(0, Math.min(100, Math.round(fr / 10) * 10));
+  const fb = Number(j.fuel_bars), ft = Number(j.fuel_total);   // แบบขีด: นับขีดเอง แม่นกว่าให้ AI คิด %
+  if (Number.isFinite(fb) && fb > 0 && Number.isFinite(ft) && ft >= fb && ft <= 16) fuel = Math.round(fb / ft * 10) * 10;
   return { kind, odo, fuel, liters: num(j.liters), cost: num(j.cost), amount: num(j.amount), raw: txt.slice(0, 200) };
 }
 /* อ่านรูป: Llama 4 Scout ก่อน ถ้าขาดค่าไหนลอง Llama 3.2 Vision แล้วรวมผล */
@@ -313,8 +317,8 @@ async function readDash(env, bytes) {
   if (!env.AI) return { kind: null, odo: null, fuel: null, liters: null, cost: null, log: ['ยังไม่ได้ผูก Workers AI'] };
   const url = 'data:image/jpeg;base64,' + b64(bytes);
   const tries = [
-    ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 90, temperature: 0 }],
-    [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 90, temperature: 0 }],
+    ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 130, temperature: 0 }],
+    [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 130, temperature: 0 }],
   ];
   const res = { kind: null, odo: null, fuel: null, liters: null, cost: null, amount: null, log: [] };
   const done = () => res.kind === 'other' || (res.kind === 'slip' && res.amount != null) || (res.kind === 'bill' && res.liters != null && res.cost != null) || (res.kind === 'dash' && res.odo != null && res.fuel != null);
@@ -663,7 +667,8 @@ export default {
         const day = url.searchParams.get('date') || bkkNow().date;
         const page = await env.BUCKET.list({ prefix: 'data/records/' + day.slice(0, 7) + '/' + day + '_', limit: 50 });
         const out = [];
-        for (const o of page.objects.slice(0, 6)) {
+        const onlyCar = url.searchParams.get('car') || '';
+        for (const o of page.objects.filter((x) => !onlyCar || x.key.includes('_' + onlyCar)).slice(0, 6)) {
           const r = await getJson(env, o.key, null);
           const ph = r && String(r.photoOdo || '').split('/photos/')[1];
           if (!ph) continue;
