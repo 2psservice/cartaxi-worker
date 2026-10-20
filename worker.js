@@ -687,8 +687,9 @@ export default {
             const rr = env.ASSETS ? await env.ASSETS.fetch(new Request(origin + '/t/' + n + '.jpg')) : await fetch(origin + '/t/' + n + '.jpg');
             const bytes = new Uint8Array(await rr.arrayBuffer());
             if (mk === 'pipeline') return { img: n, res: await readDash(env, bytes) };
-            const model = MODELS[mk];
-            const input = mk === 'llama32' ? { prompt, image: [...bytes], max_tokens: 600, temperature: 0 }
+            const model = MODELS[mk] || (mk.startsWith('@cf/') ? mk : null);
+            if (!model) return { img: n, err: 'unknown model' };
+            const input = mk === 'llama32' || url.searchParams.get('raw') ? { prompt, image: [...bytes], max_tokens: 600, temperature: 0 }
               : { messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64(bytes) } }] }], max_tokens: 600, temperature: 0 };
             const o = await aiRun(env, model, input);
             return { img: n, raw: typeof o === 'object' && o && 'response' in o ? o.response : o };
