@@ -293,6 +293,12 @@ const DASH_PROMPT =
   'If "bill": LITERS = fuel quantity in litres (the Quantity / จำนวน / ลิตร column), COST = total amount paid in baht (NET TOTAL / จำนวนเงินรวม / Amount).\n' +
   'If "slip": AMOUNT = the transferred amount in baht (จำนวนเงิน).\n' +
   'Answer with ONLY compact JSON and nothing else: {"kind":"dash|bill|slip|other","odo":<int or null>,"fuel_bars":<int or null>,"fuel_total":<int or null>,"fuel":<int 0-100 or null>,"liters":<number or null>,"cost":<number or null>,"amount":<number or null>}';
+const FUEL_PROMPT =
+  'Look ONLY at the fuel gauge of this car dashboard (the part next to the fuel-pump icon). ' +
+  'If it is a needle: where does it point between E (0) and F (100)? ' +
+  'If it is a column of dark rectangular blocks inside a bracket from 0 (bottom) to 1 (top): count every dark filled rectangle stacked up from the bottom, even small ones at the very bottom next to the 0 (fuel_bars), ' +
+  'and how many such rectangles would fill the bracket from 0 to 1 (fuel_total, usually 8). ' +
+  'Answer ONLY compact JSON: {"fuel_bars":<int or null>,"fuel_total":<int or null>,"fuel":<int 0-100>}';
 function num(v) { if (v == null || v === '') return null; const n = Number(String(v).replace(/[^\d.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; }
 function parseDash(out) {
   let v = out && typeof out === 'object' && 'response' in out ? out.response : out;
@@ -331,6 +337,14 @@ async function readDash(env, bytes) {
     } catch (e) { res.log.push(model.split('/').pop() + ' ERR ' + String(e && e.message || e).slice(0, 120)); }
   }
   if (!res.kind) res.kind = res.odo != null ? 'dash' : res.liters != null || res.cost != null ? 'bill' : 'other';
+  if (res.kind === 'dash' && !res.fuel) {   // น้ำมัน 0/อ่านไม่ได้ = น่าสงสัย ถามซ้ำเฉพาะเกจน้ำมัน
+    try {
+      const out = await aiRun(env, '@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: FUEL_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 });
+      const r = parseDash(out);
+      res.log.push('fuel-recheck: ' + r.raw);
+      if (r.fuel) res.fuel = r.fuel;
+    } catch (e) { res.log.push('fuel-recheck ERR ' + String(e && e.message || e).slice(0, 120)); }
+  }
   await putJson(env, 'data/line/ocr.json', { at: new Date().toISOString(), ...res }).catch(() => {});
   return res;
 }
