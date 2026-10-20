@@ -299,6 +299,27 @@ const FUEL_PROMPT =
   'If it is a column of dark rectangular blocks inside a bracket from 0 (bottom) to 1 (top): count every dark filled rectangle stacked up from the bottom, even small ones at the very bottom next to the 0 (fuel_bars), ' +
   'and how many such rectangles would fill the bracket from 0 to 1 (fuel_total, usually 8). ' +
   'Answer ONLY compact JSON: {"fuel_bars":<int or null>,"fuel_total":<int or null>,"fuel":<int 0-100>}';
+/* อัตราใช้น้ำมัน (% ต่อ กม.) ของรถคันนี้ จากประวัติช่วงที่ไม่ได้เติม · ไม่มีข้อมูลใช้ 0.2%/กม. (~500 กม./ถัง) */
+function fuelRate(recs) {
+  const l = (recs || []).filter((r) => r && r.odo && r.fuel != null);
+  const rates = [];
+  for (let i = 1; i < l.length; i++) {
+    const a = l[i - 1], b = l[i], km = b.odo - a.odo, d = fuelPct(a) - fuelPct(b);
+    if (km >= 30 && d > 0 && !b.liters) rates.push(d / km);
+  }
+  if (rates.length < 2) return 0.2;
+  rates.sort((x, y) => x - y);
+  return Math.max(0.05, Math.min(0.8, rates[Math.floor(rates.length / 2)]));
+}
+async function readOdoHint(env, bytes, prevOdo) {
+  const text = 'Read the ODOMETER of this car dashboard: the total distance in km (labelled ODO on digital clusters, or the 6-digit rolling counter inside an analog speedometer). Ignore TRIP, RANGE, km/l, clock. ' +
+    'Hint: the previous reading of this car was ' + prevOdo + ' km, so the odometer should be the same number of digits and a little higher. Read every digit carefully from left to right. ' +
+    'Answer ONLY JSON {"odo":<int>}';
+  try {
+    const o = await aiRun(env, '@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64(bytes) } }] }], max_tokens: 60, temperature: 0 });
+    return parseDash(o).odo;
+  } catch (e) { return null; }
+}
 function num(v) { if (v == null || v === '') return null; const n = Number(String(v).replace(/[^\d.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; }
 function parseDash(out) {
   let v = out && typeof out === 'object' && 'response' in out ? out.response : out;
@@ -400,7 +421,16 @@ async function tryComplete(env, uid, replyToken, origin) {
   const now = bkkNow();
   const trip = recs.some((r) => r.date === now.date && r.trip !== 'in') ? 'in' : 'out';
   const prev = recs.filter((r) => (r.date + (r.trip === 'in' ? 'b' : 'a')) < (now.date + (trip === 'in' ? 'b' : 'a'))).pop() || null;
-  const odo = u.car.typedOdo || readOdo;
+  const dashPick = dashes.filter((x) => x.odo === readOdo).pop() || dashes[dashes.length - 1] || null;
+  let odo = u.car.typedOdo || readOdo;
+  const okOdo = (v) => v && (!prev || (v >= prev.odo && v - prev.odo <= MAX_KM_DAY));
+  if (!u.car.typedOdo && !okOdo(odo) && prev) {   // อ่านเลขไมล์ไม่ผ่าน → ให้ AI อ่านซ้ำโดยบอกเลขไมล์ครั้งก่อนเป็นตัวช่วย
+    for (const x of dashes.slice().reverse()) {
+      const obj = x.photo ? await env.BUCKET.get('photos/' + x.photo) : null; if (!obj) continue;
+      const v = await readOdoHint(env, new Uint8Array(await obj.arrayBuffer()), prev.odo);
+      if (okOdo(v)) { odo = v; break; }
+    }
+  }
   const plate = 'รถ ' + (car.plate || car.id);
   const carNo = String(car.plate || car.id).replace(/\D/g, '') || String(car.plate);
   const bad = !odo ? 'อ่านเลขไมล์จากรูปไม่ได้'
@@ -412,15 +442,21 @@ async function tryComplete(env, uid, replyToken, origin) {
     return true;
   }
   // หน้าปัดที่ใช้: รูปที่เลขไมล์มากสุด (หลังเติม) · น้ำมัน: มีบิลเติม = 100% ไม่งั้นใช้ค่าจากหน้าปัดรูปล่าสุดที่อ่านได้
-  const dashPick = dashes.filter((x) => x.odo === readOdo).pop() || dashes[dashes.length - 1] || null;
-  const fuelPctV = bill ? 100 : (dashes.slice().reverse().find((x) => x.fuel != null) || {}).fuel ?? null;
+  const aiFuel = (dashes.slice().reverse().find((x) => x.fuel != null) || {}).fuel ?? null;
+  let fuelPctV = bill ? 100 : aiFuel, fuelWarn = '';
+  const pf = fuelPct(prev);
+  if (!bill && pf != null && odo >= prev.odo) {   // เทียบกับที่ควรเหลือ (น้ำมันครั้งก่อน − ระยะที่วิ่ง × อัตราใช้ของรถคันนี้)
+    const exp = Math.max(0, Math.min(100, Math.round((pf - (odo - prev.odo) * fuelRate(recs)) / 10) * 10));
+    if (aiFuel == null) { fuelPctV = exp; fuelWarn = 'AI อ่านระดับน้ำมันไม่ได้ ใส่ค่าประมาณจากระยะทาง ' + exp + '% ไว้ก่อน'; }
+    else if (Math.abs(aiFuel - exp) > 30) { fuelPctV = exp; fuelWarn = 'AI อ่านได้ ' + aiFuel + '% แต่จากระยะทางควรเหลือราว ' + exp + '% จึงบันทึก ' + exp + '% ไว้ก่อน'; }
+  }
   const r = {
     id: rid(), date: now.date, trip, time: now.time, carId: car.id, driver: u.car.name || 'คนขับ',
     odo, fuel: fuelPctV == null ? null : fuelPctV / 10, fs: 10, km: prev ? odo - prev.odo : null,
     liters: bill ? bill.liters : null, cost: bill ? bill.cost : null,
     photoOdo: dashPick && dashPick.photo ? origin + '/photos/' + dashPick.photo : null,
     photoBill: bill && bill.photo ? origin + '/photos/' + bill.photo : null,
-    note: (u.car.typedOdo ? 'เลขไมล์พิมพ์ใน LINE' : 'อ่านจากรูปใน LINE อัตโนมัติ') + (bill ? ' · เติมน้ำมัน (เต็มถัง)' : ''), route: '', src: 'line',
+    note: (u.car.typedOdo ? 'เลขไมล์พิมพ์ใน LINE' : 'อ่านจากรูปใน LINE อัตโนมัติ') + (bill ? ' · เติมน้ำมัน (เต็มถัง)' : '') + (fuelWarn ? ' · น้ำมันประมาณจากระยะทาง' : ''), route: '', src: 'line',
   };
   const key = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + car.id + (trip === 'in' ? '_in' : '') + '.json';
   await putJson(env, key, r);
@@ -430,7 +466,7 @@ async function tryComplete(env, uid, replyToken, origin) {
   const head = '✅ บันทึก' + (isIn ? 'ขากลับ' : 'ขาไป') + ' รถ ' + (car.plate || car.id) + ' · ' + r.driver + ' · ' + r.time + ' น.' + (bill ? ' · เติมน้ำมัน' : '');
   const msgs = [await fleetTable(env, origin, car.id, head)];
   const qr = { items: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => ({ type: 'action', action: { type: 'message', label: v + '%', text: carNo + ' น้ำมัน ' + v + '%' } })) };
-  msgs.push({ type: 'text', text: fp == null ? '⛽ อ่านระดับน้ำมันจากรูปไม่ได้ แตะเลือกด้านล่างได้เลย' : '⛽ ระดับน้ำมันไม่ตรง? แตะเลือกค่าที่ถูกด้านล่าง', quickReply: qr });
+  msgs.push({ type: 'text', text: fuelWarn ? '⛽ ' + fuelWarn + '\nกรุณาดูหน้าปัดแล้วแตะเลือกค่าที่ถูกด้านล่าง' : fp == null ? '⛽ อ่านระดับน้ำมันจากรูปไม่ได้ แตะเลือกด้านล่างได้เลย' : '⛽ ระดับน้ำมันไม่ตรง? แตะเลือกค่าที่ถูกด้านล่าง', quickReply: qr });
   await lineReply(env, replyToken, msgs);
   return true;
 }
