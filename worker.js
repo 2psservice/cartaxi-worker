@@ -270,15 +270,6 @@ function b64(bytes) {
   for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
   return btoa(bin);
 }
-const DASH_PROMPT =
-  'You are reading a photo of a car instrument cluster (Thai pickup trucks / vans).\n' +
-  'Task 1 - ODOMETER: the total distance in km. On digital clusters it is labelled ODO (ignore TRIP A/B, range, time, temperature). ' +
-  'On analog clusters it is the 6-digit rolling counter inside the speedometer (ignore the smaller trip counter). Return the full integer.\n' +
-  'Task 2 - FUEL LEVEL as percent: find the fuel gauge (fuel-pump icon, letters E and F). ' +
-  'Analog needle: E=0, 1/4=25, 1/2=50, 3/4=75, F=100, estimate where the needle points. ' +
-  'Digital bars: lit bars / total bars x 100. Round to the nearest 10. ' +
-  'Return null only if no fuel gauge is visible at all.\n' +
-  'Answer with ONLY compact JSON and nothing else: {"odo":<integer or null>,"fuel":<integer 0-100 or null>}';
 async function aiRun(env, model, input) {
   try { return await env.AI.run(model, input); }
   catch (e) {
@@ -286,39 +277,55 @@ async function aiRun(env, model, input) {
     throw e;
   }
 }
+
+const DASH_PROMPT =
+  'Look at this photo and classify it.\n' +
+  '- "dash": a car instrument cluster / dashboard.\n' +
+  '- "bill": a fuel station receipt / tax invoice.\n' +
+  '- "other": anything else.\n' +
+  'If "dash": ODOMETER = total distance in km. Digital clusters: the value labelled ODO (ignore TRIP A/B, range, clock, temperature). ' +
+  'Analog clusters: the 6-digit rolling counter inside the speedometer (ignore the smaller trip counter). ' +
+  'FUEL = fuel gauge (fuel-pump icon, E and F). Analog needle: E=0, 1/4=25, 1/2=50, 3/4=75, F=100, estimate where the needle points. ' +
+  'Digital bars: lit bars / total bars x 100. Round to nearest 10. null only if no fuel gauge is visible.\n' +
+  'If "bill": LITERS = fuel quantity in litres (the Quantity / จำนวน / ลิตร column), COST = total amount paid in baht (NET TOTAL / จำนวนเงินรวม / Amount).\n' +
+  'Answer with ONLY compact JSON and nothing else: {"kind":"dash|bill|other","odo":<int or null>,"fuel":<int 0-100 or null>,"liters":<number or null>,"cost":<number or null>}';
+function num(v) { if (v == null || v === '') return null; const n = Number(String(v).replace(/[^\d.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; }
 function parseDash(out) {
   let v = out && typeof out === 'object' && 'response' in out ? out.response : out;
   if (v && typeof v === 'object' && v.choices) v = v.choices[0] && v.choices[0].message && v.choices[0].message.content;
   let j = {}, txt;
-  if (v && typeof v === 'object') { j = v; txt = JSON.stringify(v); }   // บางโมเดลส่ง JSON เป็นอ็อบเจ็กต์มาเลย
+  if (v && typeof v === 'object') { j = v; txt = JSON.stringify(v); }
   else {
     txt = String(v == null ? '' : v);
     const m = txt.match(/\{[^{}]*\}/);
     try { j = m ? JSON.parse(m[0]) : {}; } catch {}
   }
-  const odo = Number.isFinite(Number(j.odo)) && Number(j.odo) > 0 ? Math.round(Number(j.odo)) : null;
-  let fuel = j.fuel == null || j.fuel === '' || !Number.isFinite(Number(j.fuel)) ? null : Math.max(0, Math.min(100, Math.round(Number(j.fuel) / 10) * 10));
-  return { odo, fuel, raw: txt.slice(0, 160) };
+  const kind = ['dash', 'bill', 'other'].includes(String(j.kind)) ? String(j.kind) : null;
+  const odo = num(j.odo) != null ? Math.round(num(j.odo)) : null;
+  const fr = j.fuel == null || j.fuel === '' ? null : Number(String(j.fuel).replace(/[^\d.]/g, ''));
+  const fuel = fr == null || !Number.isFinite(fr) ? null : Math.max(0, Math.min(100, Math.round(fr / 10) * 10));
+  return { kind, odo, fuel, liters: num(j.liters), cost: num(j.cost), raw: txt.slice(0, 200) };
 }
-/* อ่านด้วยโมเดลที่เก่งกว่าก่อน (Llama 4 Scout) ถ้าไม่ได้ค่อยใช้ Llama 3.2 Vision แล้วเอาค่าที่อ่านได้มารวมกัน */
+/* อ่านรูป: Llama 4 Scout ก่อน ถ้าขาดค่าไหนลอง Llama 3.2 Vision แล้วรวมผล */
 async function readDash(env, bytes) {
-  if (!env.AI) return { odo: null, fuel: null, err: 'ยังไม่ได้ผูก Workers AI' };
+  if (!env.AI) return { kind: null, odo: null, fuel: null, liters: null, cost: null, log: ['ยังไม่ได้ผูก Workers AI'] };
   const url = 'data:image/jpeg;base64,' + b64(bytes);
   const tries = [
-    ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 }],
-    [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 60, temperature: 0 }],
+    ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 90, temperature: 0 }],
+    [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 90, temperature: 0 }],
   ];
-  const res = { odo: null, fuel: null, log: [] };
+  const res = { kind: null, odo: null, fuel: null, liters: null, cost: null, log: [] };
+  const done = () => res.kind === 'other' || (res.kind === 'bill' && res.liters != null && res.cost != null) || (res.kind === 'dash' && res.odo != null && res.fuel != null);
   for (const [model, input] of tries) {
-    if (res.odo != null && res.fuel != null) break;
+    if (done()) break;
     try {
       const r = parseDash(await aiRun(env, model, input));
       res.log.push(model.split('/').pop() + ': ' + r.raw);
-      if (res.odo == null && r.odo != null) res.odo = r.odo;
-      if (res.fuel == null && r.fuel != null) res.fuel = r.fuel;
+      for (const k of ['kind', 'odo', 'fuel', 'liters', 'cost']) if (res[k] == null && r[k] != null) res[k] = r[k];
     } catch (e) { res.log.push(model.split('/').pop() + ' ERR ' + String(e && e.message || e).slice(0, 120)); }
   }
-  await putJson(env, 'data/line/ocr.json', { at: new Date().toISOString(), odo: res.odo, fuel: res.fuel, log: res.log }).catch(() => {});
+  if (!res.kind) res.kind = res.odo != null ? 'dash' : res.liters != null || res.cost != null ? 'bill' : 'other';
+  await putJson(env, 'data/line/ocr.json', { at: new Date().toISOString(), ...res }).catch(() => {});
   return res;
 }
 
@@ -330,42 +337,73 @@ async function savePhoto(env, bytes) {
   return name;
 }
 
-/* รวมรูป + เบอร์รถ แล้วบันทึก */
-async function tryComplete(env, pend, replyToken, origin) {
-  if (!pend.carId || !pend.photo) return false;
+/* ===== ที่พักข้อมูลต่อคนส่ง: data/line/p/<userId>/  car.json = เบอร์รถ · img-<id>.json = ผลอ่านแต่ละรูป ===== */
+const PDIR = (uid) => 'data/line/p/' + uid + '/';
+async function listUser(env, uid) {
+  const page = await env.BUCKET.list({ prefix: PDIR(uid), limit: 100 });
+  const out = { car: null, imgs: [], keys: page.objects.map((o) => o.key) };
+  for (const k of out.keys) {
+    const x = await getJson(env, k, null); if (!x) continue;
+    if (Date.now() - (x.at || 0) > PAIR_MS) { await env.BUCKET.delete(k); continue; }
+    if (k.endsWith('/car.json')) out.car = x; else if (k.includes('/img-')) out.imgs.push(x);
+  }
+  out.imgs.sort((a, b) => (a.set && b.set && a.set.id === b.set.id ? a.set.index - b.set.index : a.at - b.at));
+  return out;
+}
+async function clearUser(env, uid) {
+  const page = await env.BUCKET.list({ prefix: PDIR(uid), limit: 100 });
+  for (const o of page.objects) await env.BUCKET.delete(o.key);
+}
+
+/* รวมรูป (หน้าปัด/บิล) + เบอร์รถ แล้วบันทึก — เรียกทุกครั้งที่มีรูปอ่านเสร็จหรือมีคนพิมพ์เบอร์รถ */
+async function tryComplete(env, uid, replyToken, origin) {
+  const u = await listUser(env, uid);
+  if (!u.car || !u.imgs.length) return false;
+  if (u.imgs.some((x) => x.processing)) return false;                       // ยังอ่านรูปไม่เสร็จ
+  const last = u.imgs[u.imgs.length - 1];
+  if (last.set && u.imgs.filter((x) => x.set && x.set.id === last.set.id).length < last.set.total) return false;   // อัลบั้มยังมาไม่ครบ
+  const claimKey = PDIR(uid) + 'claim.json';
+  const claim = await getJson(env, claimKey, null);
+  if (claim && Date.now() - claim.at < 60000) return false;                // อีกงานกำลังบันทึกอยู่
+  await putJson(env, claimKey, { at: Date.now() });
+
   const cars = await getJson(env, 'data/cars.json', []);
-  const car = (cars || []).find((c) => c.id === pend.carId);
-  if (!car) return false;
+  const car = (cars || []).find((c) => c.id === u.car.carId);
+  if (!car) { await env.BUCKET.delete(claimKey); return false; }
+  const dashes = u.imgs.filter((x) => x.kind === 'dash' || (x.kind !== 'bill' && x.odo != null));
+  const bills = u.imgs.filter((x) => x.kind === 'bill');
+  const bill = bills[bills.length - 1] || null;
+  const readOdo = dashes.reduce((m, x) => (x.odo != null && (m == null || x.odo > m) ? x.odo : m), null);
   const recs = await carRecords(env, car.id);
   const now = bkkNow();
-  const todays = recs.filter((r) => r.date === now.date);
-  const trip = todays.some((r) => r.trip !== 'in') ? 'in' : 'out';
+  const trip = recs.some((r) => r.date === now.date && r.trip !== 'in') ? 'in' : 'out';
   const prev = recs.filter((r) => (r.date + (r.trip === 'in' ? 'b' : 'a')) < (now.date + (trip === 'in' ? 'b' : 'a'))).pop() || null;
-  const odo = pend.typedOdo || pend.ocr.odo;
+  const odo = u.car.typedOdo || readOdo;
   const plate = 'รถ ' + (car.plate || car.id);
+  const carNo = String(car.plate || car.id).replace(/\D/g, '') || String(car.plate);
   const bad = !odo ? 'อ่านเลขไมล์จากรูปไม่ได้'
     : prev && odo < prev.odo ? 'เลขไมล์ที่อ่านได้ ' + nf(odo) + ' น้อยกว่าครั้งก่อน (' + nf(prev.odo) + ')'
-    : prev && odo - prev.odo > MAX_KM_DAY ? 'เลขไมล์ที่อ่านได้ ' + nf(odo) + ' มากกว่าครั้งก่อนเกิน ' + MAX_KM_DAY + ' กม.'
-    : '';
-  if (bad && !pend.typedOdo) {
-    pend.waitOdo = true; await putJson(env, 'data/line/pending/' + pend.userId + '.json', pend);
-    await lineReply(env, replyToken, [textMsg('⚠️ ' + plate + ': ' + bad + '\nกรุณาพิมพ์เบอร์รถตามด้วยเลขไมล์ เช่น  ' + String(car.plate).replace(/\D/g, '') + ' ' + (prev ? prev.odo + 50 : 123456))]);
+    : prev && odo - prev.odo > MAX_KM_DAY ? 'เลขไมล์ที่อ่านได้ ' + nf(odo) + ' มากกว่าครั้งก่อนเกิน ' + MAX_KM_DAY + ' กม.' : '';
+  if (bad && (!u.car.typedOdo || (prev && odo < prev.odo))) {
+    await env.BUCKET.delete(claimKey);
+    await lineReply(env, replyToken, [textMsg('⚠️ ' + plate + ': ' + bad + '\nกรุณาพิมพ์เบอร์รถตามด้วยเลขไมล์ เช่น  ' + carNo + ' ' + (prev ? prev.odo + 50 : 123456))]);
     return true;
   }
-  if (bad && pend.typedOdo && prev && odo < prev.odo) {
-    await lineReply(env, replyToken, [textMsg('⚠️ ' + plate + ': เลขไมล์ ' + nf(odo) + ' น้อยกว่าครั้งก่อน (' + nf(prev.odo) + ') ยังไม่บันทึก กรุณาตรวจแล้วพิมพ์ใหม่')]);
-    return true;
-  }
-  const fuel10 = pend.ocr.fuel == null ? null : Math.round(pend.ocr.fuel / 10);
+  // หน้าปัดที่ใช้: รูปที่เลขไมล์มากสุด (หลังเติม) · น้ำมัน: มีบิลเติม = 100% ไม่งั้นใช้ค่าจากหน้าปัดรูปล่าสุดที่อ่านได้
+  const dashPick = dashes.filter((x) => x.odo === readOdo).pop() || dashes[dashes.length - 1] || null;
+  const fuelPctV = bill ? 100 : (dashes.slice().reverse().find((x) => x.fuel != null) || {}).fuel ?? null;
   const r = {
-    id: rid(), date: now.date, trip, time: now.time, carId: car.id, driver: pend.name || 'คนขับ',
-    odo, fuel: fuel10, fs: 10, km: prev ? odo - prev.odo : null, liters: null, cost: null,
-    photoOdo: pend.photo ? origin + '/photos/' + pend.photo : null, photoBill: null,
-    note: pend.typedOdo ? 'เลขไมล์พิมพ์ใน LINE' : 'อ่านจากรูปใน LINE อัตโนมัติ', route: '', src: 'line',
+    id: rid(), date: now.date, trip, time: now.time, carId: car.id, driver: u.car.name || 'คนขับ',
+    odo, fuel: fuelPctV == null ? null : fuelPctV / 10, fs: 10, km: prev ? odo - prev.odo : null,
+    liters: bill ? bill.liters : null, cost: bill ? bill.cost : null,
+    photoOdo: dashPick && dashPick.photo ? origin + '/photos/' + dashPick.photo : null,
+    photoBill: bill && bill.photo ? origin + '/photos/' + bill.photo : null,
+    note: (u.car.typedOdo ? 'เลขไมล์พิมพ์ใน LINE' : 'อ่านจากรูปใน LINE อัตโนมัติ') + (bill ? ' · เติมน้ำมัน (เต็มถัง)' : ''), route: '', src: 'line',
   };
   const key = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + car.id + (trip === 'in' ? '_in' : '') + '.json';
   await putJson(env, key, r);
-  await env.BUCKET.delete('data/line/pending/' + pend.userId + '.json');
+  await clearUser(env, uid);
+
   const isIn = trip === 'in', fp = fuelPct(r);
   const rows = [
     row('👤', 'ผู้ขับ', r.driver),
@@ -373,11 +411,11 @@ async function tryComplete(env, pend, replyToken, origin) {
     row('🚗', 'เลขไมล์', nf(r.odo) + ' กม.'),
   ];
   if (r.km != null) rows.push(row('📏', 'วิ่งจากครั้งก่อน', '+' + nf(r.km) + ' กม.', '#1F8A4C'));
-  rows.push(row('⛽', 'น้ำมัน', fp == null ? 'อ่านไม่ได้ (แก้ในแอป)' : fp + '%', fp != null && fp <= 25 ? '#C8372D' : null));
-  rows.push({ type: 'text', text: (pend.typedOdo ? 'เลขไมล์จากที่พิมพ์' : 'อ่านจากรูปอัตโนมัติ') + ' · ถ้าผิดกด "เปิดแอป" แล้วแก้ไขได้', size: 'xs', color: '#6B7280', wrap: true, margin: 'md' });
-  const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate;
+  rows.push(row('⛽', 'น้ำมัน', fp == null ? 'อ่านไม่ได้' : fp + '%' + (bill ? ' (เติมเต็ม)' : ''), fp != null && fp <= 25 ? '#C8372D' : null));
+  if (bill) rows.push(row('🧾', 'เติมน้ำมัน', (r.liters ? r.liters + ' ล.' : '? ล.') + ' · ' + (r.cost ? nf(r.cost) + ' บาท' : '? บาท')));
+  rows.push({ type: 'text', text: (u.car.typedOdo ? 'เลขไมล์จากที่พิมพ์' : 'อ่านจากรูปอัตโนมัติ') + ' · ถ้าผิดกด "เปิดแอป" แล้วแก้ไขได้', size: 'xs', color: '#6B7280', wrap: true, margin: 'md' });
+  const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate + (bill ? ' · เติมน้ำมัน' : '');
   const bubble = card(isIn ? '#C8372D' : '#1F8A4C', 'FLEET DAILY CHECK · 2PS', title, rows, httpsUrl(r.photoOdo), origin + '/');
-  const carNo = String(car.plate || car.id).replace(/\D/g, '') || String(car.plate);
   const qr = { items: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => ({ type: 'action', action: { type: 'message', label: v + '%', text: carNo + ' น้ำมัน ' + v + '%' } })) };
   const msgs = [{ type: 'flex', altText: title + ' · ไมล์ ' + nf(r.odo) + ' · น้ำมัน ' + (fp == null ? '—' : fp + '%'), contents: bubble }];
   msgs.push({ type: 'text', text: fp == null ? '⛽ อ่านระดับน้ำมันจากรูปไม่ได้ แตะเลือกด้านล่างได้เลย' : '⛽ ระดับน้ำมันไม่ตรง? แตะเลือกค่าที่ถูกด้านล่าง', quickReply: qr });
@@ -392,62 +430,48 @@ async function handleLineEvent(env, ev, origin) {
     if (!cur || cur.id !== src.groupId) await putJson(env, 'data/line/target.json', { id: src.groupId, type: 'group', at: new Date().toISOString() });
   }
   if (ev.type !== 'message' || !src.userId || !env.LINE_TOKEN) return;
-  const msg = ev.message || {};
-  const pkey = 'data/line/pending/' + src.userId + '.json';
-  let pend = await getJson(env, pkey, null);
-  if (pend && Date.now() - pend.at > PAIR_MS) pend = null;
+  const msg = ev.message || {}, uid = src.userId;
 
   if (msg.type === 'image') {
+    const ikey = PDIR(uid) + 'img-' + msg.id + '.json';
+    const set = msg.imageSet ? { id: msg.imageSet.id, index: msg.imageSet.index || 1, total: msg.imageSet.total || 1 } : null;
+    await putJson(env, ikey, { at: Date.now(), processing: true, set });
     const res = await fetch('https://api-data.line.me/v2/bot/message/' + msg.id + '/content', { headers: { Authorization: 'Bearer ' + env.LINE_TOKEN } });
-    if (!res.ok) return;
+    if (!res.ok) { await env.BUCKET.delete(ikey); return; }
     const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength > 6 * 1024 * 1024) return;
-    const early = pend && !pend.photo ? pend : null;   // พิมพ์เบอร์รถมาก่อนรูป
-    await putJson(env, pkey, { userId: src.userId, name: (pend && pend.name) || '', at: Date.now(), processing: true, photo: null,
-      ocr: { odo: null, fuel: null }, carId: early ? early.carId : null, typedOdo: early ? early.typedOdo : null });
-    const [photo, ocr, name] = await Promise.all([savePhoto(env, bytes), readDash(env, bytes), displayName(env, src)]);
-    const latest = (await getJson(env, pkey, null)) || {};   // เบอร์รถที่พิมพ์ตามมาระหว่างอ่านรูป
-    pend = { userId: src.userId, name: name || latest.name || '', at: Date.now(), photo, ocr,
-      carId: latest.carId || null, typedOdo: latest.typedOdo || null };
-    await putJson(env, pkey, pend);
-    await tryComplete(env, pend, ev.replyToken, origin);
+    if (bytes.byteLength > 6 * 1024 * 1024) { await env.BUCKET.delete(ikey); return; }
+    const [photo, ocr] = await Promise.all([savePhoto(env, bytes), readDash(env, bytes)]);
+    await putJson(env, ikey, { at: Date.now(), set, photo, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost });
+    await tryComplete(env, uid, ev.replyToken, origin);
     return;
   }
-  if (msg.type === 'text') {
-    const cars = await getJson(env, 'data/cars.json', []);
-    const fm = String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%?/);
-    if (fm) {   // แก้ระดับน้ำมัน เช่น "02 น้ำมัน 60%" (มาจากปุ่มด่วน)
-      const pc = parseCarText(msg.text.replace(fm[0], ''), cars);
-      const v = Math.max(0, Math.min(100, Math.round(parseInt(fm[1], 10) / 10) * 10));
-      if (!pc) return;
-      const now = bkkNow(), base = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + pc.car.id;
-      let key = base + '_in.json', rec = await getJson(env, key, null);
-      if (!rec) { key = base + '.json'; rec = await getJson(env, key, null); }
-      if (!rec) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการวันนี้ของรถ ' + pc.car.plate + ' ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
-      rec.fuel = v / 10; rec.fs = 10;
-      await putJson(env, key, rec);
-      await lineReply(env, ev.replyToken, [textMsg('✅ รถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') น้ำมัน ' + v + '% บันทึกแล้ว')]);
-      return;
-    }
-    const p = parseCarText(msg.text, cars);
-    if (!p) return;
-    if (pend && pend.processing) {   // รูปกำลังถูกอ่านอยู่ ฝากเบอร์รถไว้ ให้ฝั่งรูปบันทึกและตอบกลับ
-      pend.carId = p.car.id; if (p.odo) pend.typedOdo = p.odo;
-      await putJson(env, pkey, pend); return;
-    }
-    if (!pend) {
-      if (!p.odo) { await putJson(env, pkey, { userId: src.userId, name: await displayName(env, src), at: Date.now(), carId: p.car.id, typedOdo: null, photo: null, ocr: { odo: null, fuel: null } }); return; }
-      pend = { userId: src.userId, name: await displayName(env, src), at: Date.now(), photo: null, ocr: { odo: null, fuel: null } };
-    }
-    pend.carId = p.car.id; if (p.odo) pend.typedOdo = p.odo; pend.at = Date.now();
-    if (!pend.name) pend.name = await displayName(env, src);
-    await putJson(env, pkey, pend);
-    if (!pend.photo && p.odo) {
-      await lineReply(env, ev.replyToken, [textMsg('รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย')]);
-      return;
-    }
-    await tryComplete(env, pend, ev.replyToken, origin);
+  if (msg.type !== 'text') return;
+  const cars = await getJson(env, 'data/cars.json', []);
+  const fm = String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%?/);
+  if (fm) {   // แก้ระดับน้ำมัน เช่น "02 น้ำมัน 60%" (มาจากปุ่มด่วน)
+    const pc = parseCarText(msg.text.replace(fm[0], ''), cars);
+    const v = Math.max(0, Math.min(100, Math.round(parseInt(fm[1], 10) / 10) * 10));
+    if (!pc) return;
+    const now = bkkNow(), base = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + pc.car.id;
+    let key = base + '_in.json', rec = await getJson(env, key, null);
+    if (!rec) { key = base + '.json'; rec = await getJson(env, key, null); }
+    if (!rec) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการวันนี้ของรถ ' + pc.car.plate + ' ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
+    rec.fuel = v / 10; rec.fs = 10;
+    await putJson(env, key, rec);
+    await lineReply(env, ev.replyToken, [textMsg('✅ รถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') น้ำมัน ' + v + '% บันทึกแล้ว')]);
+    return;
   }
+  const p = parseCarText(msg.text, cars);
+  if (!p) return;
+  const old = await getJson(env, PDIR(uid) + 'car.json', null);
+  const keep = old && Date.now() - old.at < PAIR_MS && old.carId === p.car.id ? old : null;
+  await putJson(env, PDIR(uid) + 'car.json', { at: Date.now(), carId: p.car.id, typedOdo: p.odo || (keep ? keep.typedOdo : null), name: (keep && keep.name) || await displayName(env, src) });
+  const u = await listUser(env, uid);
+  if (!u.imgs.length) {
+    if (p.odo) await lineReply(env, ev.replyToken, [textMsg('รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย')]);
+    return;
+  }
+  await tryComplete(env, uid, ev.replyToken, origin);
 }
 
 export default {
@@ -504,7 +528,7 @@ export default {
           bot: bot && { name: bot.displayName, basicId: bot.basicId, chatMode: bot.chatMode, error: bot.error },
           webhook: wh, target: await getJson(env, 'data/line/target.json', null),
           lastWebhook: await getJson(env, 'data/line/last.json', null), lastError: await getJson(env, 'data/line/error.json', null), lastOcr: await getJson(env, 'data/line/ocr.json', null),
-          pending: await Promise.all(pend.objects.map((o) => getJson(env, o.key, null).then((x) => x && { name: x.name, at: new Date(x.at).toISOString(), carId: x.carId, typedOdo: x.typedOdo, hasPhoto: !!x.photo, processing: !!x.processing, waitOdo: !!x.waitOdo, ocr: x.ocr }))),
+          pending: await Promise.all((await env.BUCKET.list({ prefix: 'data/line/p/', limit: 50 })).objects.map((o) => getJson(env, o.key, null).then((x) => ({ key: o.key.split('/').slice(-1)[0], ...(x || {}), at: x && x.at ? new Date(x.at).toISOString() : null })))),
           cars: ((await getJson(env, 'data/cars.json', [])) || []).map((c) => ({ id: c.id, plate: c.plate })),
         });
       }
