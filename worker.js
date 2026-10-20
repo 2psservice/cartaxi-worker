@@ -497,12 +497,13 @@ async function fleetTable(env, origin, hiId, head) {
   const pm = new Date(Date.now() + 7 * 3600e3); pm.setUTCDate(1); pm.setUTCMonth(pm.getUTCMonth() - 1);
   let recs = [];
   for (const m of [now.date.slice(0, 7), pm.toISOString().slice(0, 7)]) recs = recs.concat(await readAll(env, 'data/records/' + m + '/'));
+  const reps = await readAll(env, 'data/repairs/');
   const ord = (r) => r.date + (r.trip === 'in' ? 'b' : 'a') + (r.time || '');
   const cell = (t, o) => Object.assign({ type: 'text', text: t, size: 'xs', color: '#111827' }, o || {});
   let old0 = false;
   const H = (t, f, al) => cell(t, { flex: f, color: '#6B7280', size: 'xxs', align: al || 'start', wrap: true });
   const rows = [{ type: 'box', layout: 'horizontal', paddingAll: '6px', spacing: 'sm', backgroundColor: '#F3F4F6', cornerRadius: '6px', alignItems: 'center', contents: [
-    H('รถ', 2), H('คนขับ', 4), H('ไมล์ขาไป', 4, 'end'), H('ไมล์ขากลับ', 4, 'end'), H('น้ำมัน', 6, 'center'),
+    H('รถ', 2), H('คนขับ', 3), H('ไมล์ขาไป', 4, 'end'), H('ไมล์ขากลับ', 4, 'end'), H('ระยะทาง', 3, 'end'), H('น้ำมัน', 5, 'center'), H('สถานะรถ', 4, 'center'),
   ] }];
   for (const c of cars) {
     const l = recs.filter((r) => r.carId === c.id).sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
@@ -517,23 +518,39 @@ async function fleetTable(env, origin, hiId, head) {
     const col = fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#1F8A4C';
     const hi = c.id === hiId;
     const drv = (tIn && tIn.driver) || (tOut && tOut.driver) || '—';
+    const dist = tIn && tOut && tIn.odo >= tOut.odo ? nf(tIn.odo - tOut.odo) : '—';
+    // สถานะ: งานซ่อมค้าง · ภาษี/พ.ร.บ. หมดภายใน 30 วัน · ถึงรอบน้ำมันเครื่อง (เหลือ ≤1,000 กม.)
+    const st = [];
+    const open = reps.filter((t) => t.carId === c.id && t.status !== 'done').sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+    if (open) st.push(open.status === 'waiting' ? ['🔧 รอซ่อม', '#C8372D'] : ['⚠️ แจ้งซ่อม', '#B45309']);
+    for (const [k, n] of [['taxExp', 'ภาษี'], ['actExp', 'พ.ร.บ.']]) {
+      if (!c[k]) continue;
+      const dd = Math.round((Date.parse(c[k]) - Date.parse(now.date)) / 864e5);
+      if (dd < 0) st.push(['📄 ' + n + 'ขาด', '#C8372D']); else if (dd <= 30) st.push(['📄 ' + n + ' ' + dd + ' วัน', dd <= 7 ? '#C8372D' : '#B45309']);
+    }
+    if (c.nextOil && last && c.nextOil - last.odo <= 1000) st.push(['🛢 ถ่ายน้ำมันเครื่อง', c.nextOil - last.odo <= 0 ? '#C8372D' : '#B45309']);
+    const stBox = { type: 'box', layout: 'vertical', flex: 4, contents: st.length
+      ? st.map(([t, co]) => cell(t, { size: 'xxs', color: co, wrap: true, align: 'center', weight: 'bold' }))
+      : [cell('ปกติ', { size: 'xxs', color: '#1F8A4C', align: 'center' })] };
     rows.push({ type: 'box', layout: 'horizontal', paddingAll: '6px', spacing: 'sm', cornerRadius: '6px', alignItems: 'center', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [
       cell(String(c.plate || c.id), { flex: 2, weight: 'bold', size: 'sm' }),
-      cell(drv, { flex: 4, color: tc, wrap: false }),
+      cell(drv, { flex: 3, color: tc, wrap: false }),
       cell(tOut ? nf(tOut.odo) : '—', { flex: 4, align: 'end', color: tOut ? tc : '#9CA3AF', weight: hi && !tIn ? 'bold' : 'regular' }),
       cell(tIn ? nf(tIn.odo) : '—', { flex: 4, align: 'end', color: tIn ? tc : '#9CA3AF', weight: hi && tIn ? 'bold' : 'regular' }),
-      { type: 'box', layout: 'horizontal', flex: 6, spacing: 'sm', alignItems: 'center', contents: [
+      cell(dist, { flex: 3, align: 'end', color: dist === '—' ? '#9CA3AF' : tc }),
+      { type: 'box', layout: 'horizontal', flex: 5, spacing: 'xs', alignItems: 'center', contents: [
         { type: 'box', layout: 'vertical', flex: 3, height: '10px', backgroundColor: '#E5E7EB', cornerRadius: '5px', contents: [
           { type: 'box', layout: 'vertical', height: '10px', width: Math.max(0, Math.min(100, fp || 0)) + '%', backgroundColor: col, cornerRadius: '5px', contents: [] },
         ] },
         cell(fp == null ? '—' : fp + '%', { flex: 2, align: 'end', size: 'xxs', color: fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#111827' }),
       ] },
+      stBox,
     ] });
     rows.push({ type: 'separator', color: '#EEEEEE' });
   }
   rows.pop();
   const contents = (head ? [cell(head, { size: 'xs', color: '#1F8A4C', weight: 'bold', wrap: true, margin: 'none' }), { type: 'box', layout: 'vertical', height: '8px', contents: [] }] : []).concat(rows);
-  return { type: 'flex', altText: (head || 'สรุปรถ') + ' · รถ/เลขไมล์/น้ำมัน', contents: {
+  return { type: 'flex', altText: (head || 'สรุปรถ') + ' · เลขไมล์/ระยะทาง/น้ำมัน/สถานะรถ', contents: {
     type: 'bubble', size: 'giga',
     body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents: contents.concat(old0 ? [cell('ตัวเทา = ข้อมูลวันก่อน (วันนี้ยังไม่ส่ง)', { size: 'xxs', color: '#9CA3AF', margin: 'md' })] : []) },
     footer: { type: 'box', layout: 'vertical', paddingAll: '4px', contents: [
