@@ -513,7 +513,7 @@ async function tryAdvance(env, uid, replyToken, origin) {
   const a = { id: rid(), date: now.date, time: now.time, carId: car.id, amount: slip.amount, by: adv.name || '', photo: slip.photo ? origin + '/photos/' + slip.photo : null, src: 'line' };
   await putJson(env, 'data/advances/' + now.date.slice(0, 7) + '/' + now.date + '_' + a.id + '.json', a);
   for (const k of u.keys) { const x = await getJson(env, k, null); if (k.endsWith('/adv.json') || (x && x.kind === 'slip' && x.photo === slip.photo)) await env.BUCKET.delete(k); }
-  await lineReply(env, replyToken, [textMsg('💸 บันทึกโอนค่าน้ำมัน รถ ' + car.plate + (a.amount ? ' · ' + nf(a.amount) + ' บาท' : ' (อ่านยอดเงินไม่ได้ แก้ในแอป)'))]);
+  await lineReply(env, replyToken, [await fleetTable(env, origin, car.id, '💸 บันทึกโอนค่าน้ำมัน รถ ' + car.plate + (a.amount ? ' · ' + nf(a.amount) + ' บาท' : ' (อ่านยอดเงินไม่ได้ แก้ในแอป)'))]);
   return true;
 }
 
@@ -708,8 +708,7 @@ async function tryNote(env, uid, replyToken, origin) {
   if (img) await env.BUCKET.delete(nk); else await putJson(env, nk, Object.assign(pn, { fresh: false }));
   const cars = await getJson(env, 'data/cars.json', []);
   const car = (cars || []).find((c) => c.id === rec.carId) || { plate: rec.carId };
-  await lineReply(env, replyToken, [textMsg('📝 เพิ่มหมายเหตุรถ ' + car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ' ' + thDay(rec.date) + ')\n' + noteLine(n) +
-    (img ? (n.amount ? '' : '\n(ไม่พบยอดเงิน พิมพ์ยอดในข้อความ หรือแก้ในแอปได้)') + '\n📎 แนบรูปแล้ว' : '\nถ้ามีใบเสร็จ/รูป ส่งตามมาได้ภายใน 10 นาที'))]);
+  await lineReply(env, replyToken, [await fleetTable(env, origin, rec.carId, '📝 เพิ่มหมายเหตุรถ ' + car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ')' + (img ? ' · 📎 แนบรูปแล้ว' : ''))]);
   return true;
 }
 
@@ -742,7 +741,8 @@ async function handleLineEvent(env, ev, origin) {
   }
   if (msg.type !== 'text') return;
   if (/^\s*(สรุป|สรุปรถ|สถานะรถ|รถทั้งหมด|สรุปน้ำมัน|สรุปไมล์)\s*$/.test(msg.text || '')) {
-    await lineReply(env, ev.replyToken, [await fleetSummary(env, origin)]);
+    const nw = bkkNow();
+    await lineReply(env, ev.replyToken, [await fleetTable(env, origin, '', '🚗 สรุปรถทุกคัน · ' + thDay(nw.date) + ' ' + nw.time + ' น.')]);
     return;
   }
   const cars = await getJson(env, 'data/cars.json', []);
@@ -907,7 +907,7 @@ export default {
       if (m === 'GET' && seg[0] === 'line' && seg[1] === 'summary') {
         const pin = url.searchParams.get('pin') || '';
         if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
-        const msgS = url.searchParams.get('table') ? await fleetTable(env, origin, url.searchParams.get('hi') || '', url.searchParams.get('hi') ? '✅ บันทึกขาไป รถ ทดสอบ' : '') : await fleetSummary(env, origin);
+        const msgS = url.searchParams.get('table') ? await fleetTable(env, origin, url.searchParams.get('hi') || '', url.searchParams.get('hi') ? '✅ บันทึกขาไป รถ ทดสอบ' : '') : await fleetTable(env, origin, '', '🚗 สรุปรถทุกคัน');
         if (url.searchParams.get('validate')) {
           const v = await lineApi(env, '/v2/bot/message/validate/reply', { messages: [msgS] });
           return json(env, { validate: v.status, detail: v.ok ? 'ok' : await v.text(), message: msgS });
