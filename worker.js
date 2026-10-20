@@ -409,19 +409,9 @@ async function tryComplete(env, uid, replyToken, origin) {
   await clearUser(env, uid);
 
   const isIn = trip === 'in', fp = fuelPct(r);
-  const rows = [
-    row('👤', 'ผู้ขับ', r.driver),
-    row('🕒', 'เวลา', thDay(r.date) + ' · ' + r.time + ' น.'),
-    row('🚗', 'เลขไมล์', nf(r.odo) + ' กม.'),
-  ];
-  if (r.km != null) rows.push(row('📏', 'วิ่งจากครั้งก่อน', '+' + nf(r.km) + ' กม.', '#1F8A4C'));
-  rows.push(row('⛽', 'น้ำมัน', fp == null ? 'อ่านไม่ได้' : fp + '%' + (bill ? ' (เติมเต็ม)' : ''), fp != null && fp <= 25 ? '#C8372D' : null));
-  if (bill) rows.push(row('🧾', 'เติมน้ำมัน', (r.liters ? r.liters + ' ล.' : '? ล.') + ' · ' + (r.cost ? nf(r.cost) + ' บาท' : '? บาท')));
-  rows.push({ type: 'text', text: (u.car.typedOdo ? 'เลขไมล์จากที่พิมพ์' : 'อ่านจากรูปอัตโนมัติ') + ' · ถ้าผิดกด "เปิดแอป" แล้วแก้ไขได้', size: 'xs', color: '#6B7280', wrap: true, margin: 'md' });
-  const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate + (bill ? ' · เติมน้ำมัน' : '');
-  const bubble = card(isIn ? '#C8372D' : '#1F8A4C', 'FLEET DAILY CHECK · 2PS', title, rows, httpsUrl(r.photoOdo), origin + '/');
+  const head = '✅ บันทึก' + (isIn ? 'ขากลับ' : 'ขาไป') + ' รถ ' + (car.plate || car.id) + ' · ' + r.driver + ' · ' + r.time + ' น.' + (bill ? ' · เติมน้ำมัน' : '');
+  const msgs = [await fleetTable(env, origin, car.id, head)];
   const qr = { items: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => ({ type: 'action', action: { type: 'message', label: v + '%', text: carNo + ' น้ำมัน ' + v + '%' } })) };
-  const msgs = [{ type: 'flex', altText: title + ' · ไมล์ ' + nf(r.odo) + ' · น้ำมัน ' + (fp == null ? '—' : fp + '%'), contents: bubble }];
   msgs.push({ type: 'text', text: fp == null ? '⛽ อ่านระดับน้ำมันจากรูปไม่ได้ แตะเลือกด้านล่างได้เลย' : '⛽ ระดับน้ำมันไม่ตรง? แตะเลือกค่าที่ถูกด้านล่าง', quickReply: qr });
   await lineReply(env, replyToken, msgs);
   return true;
@@ -444,6 +434,43 @@ async function tryAdvance(env, uid, replyToken, origin) {
   for (const k of u.keys) { const x = await getJson(env, k, null); if (k.endsWith('/adv.json') || (x && x.kind === 'slip' && x.photo === slip.photo)) await env.BUCKET.delete(k); }
   await lineReply(env, replyToken, [textMsg('💸 บันทึกโอนค่าน้ำมัน รถ ' + car.plate + (a.amount ? ' · ' + nf(a.amount) + ' บาท' : ' (อ่านยอดเงินไม่ได้ แก้ในแอป)'))]);
   return true;
+}
+
+/* การ์ดตารางสั้น รถ | เลขไมล์ | น้ำมัน (ตอบกลับหลังพนักงานส่งรูปหน้าปัด) */
+async function fleetTable(env, origin, hiId, head) {
+  const cars = ((await getJson(env, 'data/cars.json', [])) || []).filter((c) => c && c.id);
+  const now = bkkNow();
+  const pm = new Date(Date.now() + 7 * 3600e3); pm.setUTCDate(1); pm.setUTCMonth(pm.getUTCMonth() - 1);
+  let recs = [];
+  for (const m of [now.date.slice(0, 7), pm.toISOString().slice(0, 7)]) recs = recs.concat(await readAll(env, 'data/records/' + m + '/'));
+  const ord = (r) => r.date + (r.trip === 'in' ? 'b' : 'a') + (r.time || '');
+  const cell = (t, o) => Object.assign({ type: 'text', text: t, size: 'sm', color: '#111827' }, o || {});
+  const rows = [{ type: 'box', layout: 'horizontal', paddingAll: '8px', backgroundColor: '#F3F4F6', cornerRadius: '6px', contents: [
+    cell('รถ', { flex: 2, color: '#6B7280', size: 'xs' }),
+    cell('เลขไมล์', { flex: 5, color: '#6B7280', size: 'xs', align: 'end' }),
+    cell('น้ำมัน', { flex: 3, color: '#6B7280', size: 'xs', align: 'end' }),
+  ] }];
+  for (const c of cars) {
+    const l = recs.filter((r) => r.carId === c.id).sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
+    const last = l[l.length - 1] || null;
+    const fp = fuelPct(last);
+    const hi = c.id === hiId;
+    rows.push({ type: 'box', layout: 'horizontal', paddingAll: '8px', cornerRadius: '6px', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [
+      cell(String(c.plate || c.id), { flex: 2, weight: 'bold' }),
+      cell(last ? nf(last.odo) : '—', { flex: 5, align: 'end', weight: hi ? 'bold' : 'regular' }),
+      cell(fp == null ? 'ไม่มีค่า' : fp + '%', { flex: 3, align: 'end', weight: 'bold', color: fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#111827' }),
+    ] });
+    rows.push({ type: 'separator', color: '#EEEEEE' });
+  }
+  rows.pop();
+  const contents = (head ? [cell(head, { size: 'xs', color: '#1F8A4C', weight: 'bold', wrap: true, margin: 'none' }), { type: 'box', layout: 'vertical', height: '8px', contents: [] }] : []).concat(rows);
+  return { type: 'flex', altText: (head || 'สรุปรถ') + ' · รถ/เลขไมล์/น้ำมัน', contents: {
+    type: 'bubble', size: 'kilo',
+    body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents },
+    footer: { type: 'box', layout: 'vertical', paddingAll: '4px', contents: [
+      { type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดแอป', uri: origin + '/' } },
+    ] },
+  } };
 }
 
 /* การ์ดสรุปรถทุกคัน (ตอบกลับเมื่อพิมพ์ "สรุปรถ" ในกลุ่ม → ฟรี) */
@@ -547,7 +574,7 @@ async function handleLineEvent(env, ev, origin) {
     if (!rec) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการวันนี้ของรถ ' + pc.car.plate + ' ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
     rec.fuel = v / 10; rec.fs = 10;
     await putJson(env, key, rec);
-    await lineReply(env, ev.replyToken, [textMsg('✅ รถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') น้ำมัน ' + v + '% บันทึกแล้ว')]);
+    await lineReply(env, ev.replyToken, [await fleetTable(env, origin, pc.car.id, '✅ แก้น้ำมันรถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') เป็น ' + v + '%')]);
     return;
   }
   if (/ค่าน้ำมัน/.test(msg.text || '')) {   // "@พัน ค่าน้ำมันรถ 04 ครับ" + สลิปโอนเงิน = โอนค่าน้ำมันให้รถคันนั้น
@@ -652,7 +679,7 @@ export default {
       if (m === 'GET' && seg[0] === 'line' && seg[1] === 'summary') {
         const pin = url.searchParams.get('pin') || '';
         if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
-        const msgS = await fleetSummary(env, origin);
+        const msgS = url.searchParams.get('table') ? await fleetTable(env, origin, url.searchParams.get('hi') || '', url.searchParams.get('hi') ? '✅ บันทึกขาไป รถ ทดสอบ' : '') : await fleetSummary(env, origin);
         if (url.searchParams.get('validate')) {
           const v = await lineApi(env, '/v2/bot/message/validate/reply', { messages: [msgS] });
           return json(env, { validate: v.status, detail: v.ok ? 'ok' : await v.text(), message: msgS });
