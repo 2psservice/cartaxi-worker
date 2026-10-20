@@ -509,6 +509,25 @@ export default {
         });
       }
 
+      // GET /api/line/ocrtest?pin=88888888  ลองอ่านรูปหน้าปัดของรายการวันนี้ใหม่ (ไม่บันทึกอะไร)
+      if (m === 'GET' && seg[0] === 'line' && seg[1] === 'ocrtest') {
+        const pin = url.searchParams.get('pin') || '';
+        if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
+        const day = url.searchParams.get('date') || bkkNow().date;
+        const page = await env.BUCKET.list({ prefix: 'data/records/' + day.slice(0, 7) + '/' + day + '_', limit: 50 });
+        const out = [];
+        for (const o of page.objects.slice(0, 6)) {
+          const r = await getJson(env, o.key, null);
+          const ph = r && String(r.photoOdo || '').split('/photos/')[1];
+          if (!ph) continue;
+          const obj = await env.BUCKET.get('photos/' + ph); if (!obj) continue;
+          const bytes = new Uint8Array(await obj.arrayBuffer());
+          const res = await readDash(env, bytes);
+          out.push({ key: o.key, saved: { odo: r.odo, fuel: r.fuel, fs: r.fs }, read: res });
+        }
+        return json(env, out);
+      }
+
       // GET /api/line/test?pin=88888888  ส่งการ์ดทดสอบเข้า LINE
       if (m === 'GET' && seg[0] === 'line' && seg[1] === 'test') {
         const pin = url.searchParams.get('pin') || '';
