@@ -25,7 +25,7 @@ const PHOTO_RE = /^\d{4}-\d{2}\/[a-z0-9_-]{8,80}\.jpg$/;
 function cors(env) {
   return {
     'Access-Control-Allow-Origin': env.ALLOW_ORIGIN || '*',
-    'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,X-App-Key',
     'Access-Control-Max-Age': '86400',
   };
@@ -713,6 +713,13 @@ export default {
           const month = url.searchParams.get('month') || '';
           if (!MONTH_RE.test(month)) return fail(env, 400, 'ระบุเดือนแบบ YYYY-MM');
           return json(env, await readAll(env, 'data/records/' + month + '/'));
+        }
+        // DELETE /api/records/<date>/<carId>[/in]  = ยกเลิกเที่ยวนั้น
+        if (m === 'DELETE' && (seg.length === 3 || (seg.length === 4 && seg[3] === 'in'))) {
+          const [, date, carId] = seg;
+          if (!DATE_RE.test(date) || !ID_RE.test(carId)) return fail(env, 400, 'วันที่หรือรหัสรถไม่ถูกต้อง');
+          await env.BUCKET.delete('data/records/' + date.slice(0, 7) + '/' + date + '_' + carId + (seg[3] === 'in' ? '_in' : '') + '.json');
+          return json(env, { ok: true });
         }
         // PUT /api/records/<date>/<carId>      = ขาไป
         // PUT /api/records/<date>/<carId>/in   = ขากลับ

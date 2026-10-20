@@ -367,6 +367,7 @@ if(window.IN_LINE){
     <div class="card" style="padding:4px 16px" id="doneKv"></div>
     <button id="nextTripBtn" class="btn" style="background:var(--red);border-color:var(--red)" onclick="setTrip('in')" hidden>บันทึกขากลับ (ตอนกลับถึงที่จอด)</button>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn2" style="flex:1" onclick="editToday()">แก้ไขข้อมูลเที่ยวนี้</button><button class="btn2" style="flex:1" onclick="otherCar()">กลับหน้ารถทั้งหมด</button></div>
+    <button id="cancelTripBtn" class="btn2" style="border-color:var(--red);color:var(--redTx)" onclick="cancelTrip()">ยกเลิกเที่ยวนี้</button>
   </div>
 
   <div class="sec"><div class="row" style="font-size:inherit"><span class="lab">ประวัติรถคันนี้ · 7 ครั้งล่าสุด</span><span id="histSum" class="mono" style="font-size:13px;color:var(--ink2)"></span></div><div id="histList" class="card"></div></div>
@@ -968,6 +969,20 @@ function renderDrvRepairs(){
     return '<div class="it"><div style="min-width:0"><b class="disp">'+esc(c.plate||'—')+'</b> '+esc(t.issue)+'<small>อัปเดต '+dt(t.updatedAt)+(t.shop?' · '+esc(t.shop):'')+'</small></div>'+rsBadge(t.status)+'</div>';
   }).join('')||'<div class="it empty">ไม่มีงานซ่อม</div>')+'</div>';
 }
+var cancelArm=false;
+function cancelTrip(){
+  var t=ymd(), trip=S.trip||'out', r=recOn(S.carId,t,trip), b=document.getElementById('cancelTripBtn');
+  if(!r)return;
+  if(!cancelArm){cancelArm=true;b.textContent='แตะอีกครั้งเพื่อยืนยันยกเลิก'+TRIP[trip];b.style.background='var(--red)';b.style.color='#fff';
+    setTimeout(function(){cancelArm=false;b.textContent='ยกเลิกเที่ยวนี้';b.style.background='';b.style.color='var(--redTx)';},4000);return;}
+  cancelArm=false;b.textContent='ยกเลิกเที่ยวนี้';b.style.background='';b.style.color='var(--redTx)';
+  DB.records.splice(DB.records.indexOf(r),1);save();
+  OUT=OUT.filter(function(o){return !(o.type==='record'&&o.id===rkey(r));});saveOut();
+  queue('recordDel',{date:r.date,carId:r.carId,trip:tripOf(r)});
+  S.editing=false;S._loaded=false;S.fuel=null;S.photoOdo=null;S.photoBill=null;
+  ['odoIn','liters','cost','note','route'].forEach(function(i){document.getElementById(i).value='';});
+  toast('ยกเลิก'+TRIP[trip]+'แล้ว');renderDriver();
+}
 function editToday(){S.editing=true;S._loaded=false;renderDriver();}
 function otherCar(){goHome();}
 
@@ -1168,7 +1183,8 @@ async function api(method,path,body,url,key){
 }
 function queue(type,data){
   if(!cloud())return;
-  var id=type==='cars'?'cars':type==='record'?rkey(data):data.id;
+  var id=type==='cars'?'cars':type==='record'?rkey(data):type==='recordDel'?'del_'+rkey(data):data.id;
+  if(type==='record')OUT=OUT.filter(function(o){return !(o.type==='recordDel'&&o.id==='del_'+id);});
   OUT=OUT.filter(function(o){return !(o.type===type&&o.id===id);});
   OUT.push({type:type,id:id,data:JSON.parse(JSON.stringify(data))});
   saveOut();syncUI();flush();
@@ -1198,6 +1214,7 @@ async function flush(){
         if(o.type==='record')await api('PUT','/api/records/'+o.data.date+'/'+o.data.carId+(tripOf(o.data)==='in'?'/in':''),o.data);
         else if(o.type==='repair')await api('PUT','/api/repairs/'+o.id,o.data);
         else if(o.type==='cars')await api('PUT','/api/cars',o.data);
+        else if(o.type==='recordDel')await api('DELETE','/api/records/'+o.data.date+'/'+o.data.carId+(o.data.trip==='in'?'/in':''));
       }catch(e){
         if(e.status===0||e.status>=500)throw e;          /* เน็ตหลุด: เก็บไว้ส่งใหม่ */
         toast('ส่งขึ้นคลาวด์ไม่สำเร็จ: '+e.message);       /* ข้อมูลถูกปฏิเสธ: ข้ามรายการนี้ */
@@ -1211,6 +1228,7 @@ async function flush(){
 function applyOut(){
   OUT.forEach(function(o){
     if(o.type==='cars'){DB.cars=JSON.parse(JSON.stringify(o.data));return;}
+    if(o.type==='recordDel'){DB.records=DB.records.filter(function(e){return ('del_'+rkey(e))!==o.id;});return;}
     var list=o.type==='record'?DB.records:DB.repairs;
     var i=list.findIndex(function(e){return o.type==='record'?(rkey(e)===o.id):e.id===o.id;});
     var v=JSON.parse(JSON.stringify(o.data));if(i>=0)list[i]=v;else list.push(v);
