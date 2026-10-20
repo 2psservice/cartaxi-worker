@@ -887,7 +887,7 @@ function renderHistAdmin(){
   document.getElementById('hRows').innerHTML=rows.slice().reverse().map(function(h){var r=h.r;
     var ph=(r.photoOdo?'<img class="thumb" src="'+r.photoOdo+'" alt="หน้าปัด" onclick="zoom(this.src)"> ':'')+(r.photoBill?'<img class="thumb" src="'+r.photoBill+'" alt="บิล" onclick="zoom(this.src)">':'');
     return '<tr><td style="white-space:nowrap">'+thDate(r.date,{weekday:'short',day:'numeric',month:'short'})+'<div class="mono" style="font-size:12px;color:var(--mute)">'+TRIP[tripOf(r)]+' '+r.time+'</div></td>'+
-      '<td style="font-size:13px">'+esc(r.driver)+'</td><td style="min-width:200px">'+(r.route?esc(r.route):'<span style="color:var(--mute)">—</span>')+(r.note?'<div style="font-size:12px;color:var(--mute)">'+esc(r.note)+'</div>':'')+'</td>'+
+      '<td style="font-size:13px">'+esc(r.driver)+'</td><td style="min-width:200px">'+(r.route?esc(r.route):'<span style="color:var(--mute)">—</span>')+(r.note?'<div style="font-size:12px;color:var(--mute)">'+esc(r.note)+'</div>':'')+(r.notes||[]).filter(function(n){return n.photo;}).map(function(n){return '<a href="'+esc(n.photo)+'" target="_blank" style="font-size:12px;margin-right:8px">🧾 '+esc(n.text)+'</a>';}).join('')+'</td>'+
       '<td class="mono r">'+fmt(r.odo)+'</td>'+
       '<td>'+(h.km==null?'<span class="mono" style="color:var(--mute)">ครั้งแรก</span>':'<div class="kmbar"><i style="width:'+Math.max(0,Math.round(h.km/max*90))+'px"></i><span class="mono" style="font-weight:600">'+fmt(h.km)+'</span></div>')+'</td>'+
       '<td class="mono">'+(h.p?flab(h.p)+' → ':'')+flab(r)+'</td><td class="mono r">'+(r.liters||'—')+'</td><td class="mono r">'+(r.cost?fmt(r.cost):'—')+'</td>'+

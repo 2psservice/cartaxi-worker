@@ -644,6 +644,45 @@ async function fleetSummary(env, origin) {
   return { type: 'flex', altText: '🚗 สรุปรถทุกคัน · ส่งวันนี้ ' + sent + '/' + cars.length + ' คัน', contents: bubble };
 }
 
+/* ===== หมายเหตุ/ค่าใช้จ่ายอื่น เช่น "สำรองจ่ายค่าน้ำมันเครื่องเบอร์ 11 แล้วครับ" + รูปใบเสร็จ → ใส่หมายเหตุในรายการล่าสุดของรถคันนั้น ===== */
+const NOTE_RE = /สำรองจ่าย|ออกเงิน|น้ำมันเครื่อง|ค่าซ่อม|ค่าอะไหล่|ค่าล้าง|ค่าทางด่วน|ค่าจอด|ค่าปะยาง|ค่ายาง|ค่าแบต|หมายเหตุ/;
+function noteLine(n) { return n.text + (n.amount ? ' ' + nf(n.amount) + ' บ.' : ''); }
+async function latestRecKey(env, carId) {
+  const recs = await carRecords(env, carId);
+  const r = recs[recs.length - 1];
+  return r ? 'data/records/' + r.date.slice(0, 7) + '/' + r.date + '_' + carId + (r.trip === 'in' ? '_in' : '') + '.json' : null;
+}
+/* เอารูปล่าสุดที่ไม่ใช่หน้าปัด (ใบเสร็จ) ของคนเดียวกันภายใน 3 นาที มาแนบกับหมายเหตุที่รออยู่ */
+async function tryNote(env, uid, replyToken, origin) {
+  const nk = PDIR(uid) + 'note.json';
+  const pn = await getJson(env, nk, null);
+  if (!pn || Date.now() - pn.at > 600000) return false;
+  const u = await listUser(env, uid);
+  if (u.imgs.some((x) => x.processing)) return false;
+  const img = u.imgs.filter((x) => x.kind !== 'dash' && Math.abs(x.at - pn.at) < 600000).pop();
+  if (!img && !pn.fresh) return false;
+  const rec = await getJson(env, pn.key, null);
+  if (!rec) { await env.BUCKET.delete(nk); return false; }
+  rec.notes = rec.notes || [];
+  let n = rec.notes.find((x) => x.id === pn.id);
+  if (!n) { n = { id: pn.id, time: pn.time, by: pn.name, text: pn.text, amount: null, photo: null }; rec.notes.push(n); }
+  if (img) {
+    n.amount = img.cost || img.amount || null;
+    n.photo = img.photo ? origin + '/photos/' + img.photo : null;
+    const k = u.keys.find((x) => x.endsWith('img-' + img.id + '.json'));
+    for (const kk of u.keys) { const x = await getJson(env, kk, null); if (x && x.photo === img.photo && kk.includes('/img-')) await env.BUCKET.delete(kk); }
+  }
+  if (rec.note0 == null) rec.note0 = rec.note || '';
+  rec.note = [rec.note0].concat(rec.notes.map(noteLine)).filter(Boolean).join(' · ');
+  await putJson(env, pn.key, rec);
+  if (img) await env.BUCKET.delete(nk); else await putJson(env, nk, Object.assign(pn, { fresh: false }));
+  const cars = await getJson(env, 'data/cars.json', []);
+  const car = (cars || []).find((c) => c.id === rec.carId) || { plate: rec.carId };
+  await lineReply(env, replyToken, [textMsg('📝 เพิ่มหมายเหตุรถ ' + car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ' ' + thDay(rec.date) + ')\n' + noteLine(n) +
+    (img ? (n.amount ? '' : '\n(อ่านยอดเงินจากใบเสร็จไม่ได้ แก้ในแอปได้)') + '\n🧾 แนบรูปใบเสร็จแล้ว' : '\nถ้ามีใบเสร็จ ส่งรูปตามมาได้ภายใน 10 นาที'))]);
+  return true;
+}
+
 async function handleLineEvent(env, ev, origin) {
   const src = ev.source || {};
   if (src.type === 'group' && src.groupId) {
@@ -665,7 +704,8 @@ async function handleLineEvent(env, ev, origin) {
     let dupOf = await getJson(env, 'data/line/hash/' + hash + '.json', null);   // รูปนี้เคยใช้บันทึกแล้ว? (ถ้ายกเลิกเที่ยวนั้นไปแล้ว ถือว่าไม่ซ้ำ)
     if (dupOf && !(await env.BUCKET.head(dupOf.key))) dupOf = null;
     const [photo, ocr] = await Promise.all([savePhoto(env, bytes), readDash(env, bytes)]);
-    await putJson(env, ikey, { at: Date.now(), set, photo, hash, dupOf, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost, amount: ocr.amount });
+    await putJson(env, ikey, { at: Date.now(), id: msg.id, set, photo, hash, dupOf, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost, amount: ocr.amount });
+    if (ocr.kind !== 'dash' && await tryNote(env, uid, ev.replyToken, origin)) return;
     if (await tryAdvance(env, uid, ev.replyToken, origin)) return;
     await tryComplete(env, uid, ev.replyToken, origin);
     return;
@@ -676,6 +716,16 @@ async function handleLineEvent(env, ev, origin) {
     return;
   }
   const cars = await getJson(env, 'data/cars.json', []);
+  if (NOTE_RE.test(msg.text || '')) {   // หมายเหตุ/ค่าใช้จ่ายอื่นของรถ
+    const pc = parseCarText(String(msg.text).replace(/@\S+/g, ' '), cars);
+    if (!pc) return;
+    const key = await latestRecKey(env, pc.car.id);
+    if (!key) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการของรถ ' + pc.car.plate + ' ให้ใส่หมายเหตุ ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
+    const text = String(msg.text).replace(/@\S+/g, '').replace(/(เบอร์|รถ|คัน)\s*\d{1,3}/g, ' ').replace(/\s*(แล้ว)?\s*(ครับ|คับ|ค่ะ|คะ|นะ|จ้า|จ้ะ)+\s*$/g, '').replace(/\s+/g, ' ').trim();
+    await putJson(env, PDIR(uid) + 'note.json', { at: Date.now(), id: rid(), key, text, time: bkkNow().time, name: await displayName(env, src), fresh: true });
+    await tryNote(env, uid, ev.replyToken, origin);
+    return;
+  }
   const fm = /ค่าน้ำมัน/.test(msg.text || '') ? null : String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%/);
   if (fm) {   // แก้ระดับน้ำมัน เช่น "02 น้ำมัน 60%" (มาจากปุ่มด่วน)
     const pc = parseCarText(msg.text.replace(fm[0], ''), cars);
