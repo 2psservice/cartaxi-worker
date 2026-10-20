@@ -163,7 +163,7 @@ async function notifyRecord(env, r, isEdit, origin) {
   if (r.km != null) rows.push(row('📏', 'วิ่งจากครั้งก่อน', (r.km >= 0 ? '+' : '') + nf(r.km) + ' กม.', r.km < 0 ? '#C8372D' : '#1F8A4C'));
   if (r.route) rows.push(row('🛣️', 'ไปไหนมา', r.route));
   if (loc) rows.push(row('📍', 'รถอยู่ที่', loc));
-  rows.push(row('⛽', 'น้ำมัน', fp == null ? '—' : fp + '%', fp != null && fp <= 25 ? '#C8372D' : null));
+  rows.push(row('⛽', 'น้ำมัน', fp == null ? '—' : fp + '%', fp != null ? fuelCol(fp) : null));
   if (r.liters || r.cost) rows.push(row('🧾', 'เติมน้ำมัน', (r.liters ? r.liters + ' ล.' : '') + (r.liters && r.cost ? ' · ' : '') + (r.cost ? nf(r.cost) + ' บาท' : '')));
   if (r.note) rows.push(row('📝', 'หมายเหตุ', r.note));
   const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate + (isEdit ? ' (แก้ไข)' : '');
@@ -542,7 +542,7 @@ async function fleetTable(env, origin, hiId, head) {
     if (old) old0 = true;
     const tc = old ? '#9CA3AF' : '#111827';
     const fp = fuelPct(last);
-    const col = fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#1F8A4C';
+    const col = fuelCol(fp);
     const hi = c.id === hiId;
     const drv = (tIn && tIn.driver) || (tOut && tOut.driver) || '—';
     const dist = tIn && tOut && tIn.odo >= tOut.odo ? nf(tIn.odo - tOut.odo) : '—';
@@ -571,7 +571,7 @@ async function fleetTable(env, origin, hiId, head) {
         { type: 'box', layout: 'vertical', flex: 3, height: '10px', backgroundColor: '#E5E7EB', cornerRadius: '5px', contents: [
           { type: 'box', layout: 'vertical', height: '10px', width: Math.max(0, Math.min(100, fp || 0)) + '%', backgroundColor: col, cornerRadius: '5px', contents: [] },
         ] },
-        cell(fp == null ? '—' : fp + '%', { flex: 2, align: 'end', size: 'xxs', color: fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#111827' }),
+        cell(fp == null ? '—' : fp + '%', { flex: 2, align: 'end', size: 'xxs', color: fp == null ? '#9CA3AF' : fp <= 30 ? '#C8372D' : fp <= 50 ? '#B45309' : '#1F8A4C' }),
       ] },
       stBox,
     ] });
@@ -616,7 +616,7 @@ async function fleetSummary(env, origin) {
     const tIn = l.find((r) => r.date === now.date && r.trip === 'in');
     const open = reps.filter((t) => t.carId === c.id && t.status !== 'done').sort((a, b) => (a.at < b.at ? 1 : -1))[0];
     const fp = fuelPct(last);
-    const col = fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : fp > 50 ? '#1F8A4C' : '#E8A317';
+    const col = fuelCol(fp);
     const loc = last ? locOf(last) : '';
     const today = open && open.status === 'waiting' ? '🔧 รอซ่อม' : (tOut ? 'ไป ' + tOut.time : 'ไป –') + ' · ' + (tIn ? 'กลับ ' + tIn.time : 'กลับ –');
     rows.push({ type: 'separator', margin: 'md' });
@@ -674,6 +674,8 @@ function noMention(msg) {   // ตัดชื่อที่ @ แท็กอ�
   for (const m of ms) t = t.slice(0, m.index) + ' ' + t.slice(m.index + m.length);
   return t.replace(/@\S+/g, ' ').replace(/\s+/g, ' ').trim();
 }
+/* สีน้ำมัน: ≤30% แดง · 31–50% เหลือง · 51–100% เขียว */
+function fuelCol(fp) { return fp == null ? '#9CA3AF' : fp <= 30 ? '#C8372D' : fp <= 50 ? '#E8A317' : '#1F8A4C'; }
 function noteLine(n) { return n.text + (n.amount ? ' ' + nf(n.amount) + ' บ.' : ''); }
 async function latestRecKey(env, carId) {
   const recs = await carRecords(env, carId);

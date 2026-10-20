@@ -702,7 +702,7 @@ function renderTripBar(hide){
 }
 function goHome(){S={view:'home'};['odoIn','liters','cost','note','drvName','route'].forEach(function(i){document.getElementById(i).value='';});renderDriver();window.scrollTo(0,0);}
 /* ระดับน้ำมัน (%): เกิน 50% = เขียว, 30–50% = เหลือง, 25% ลงไป = แดง */
-function fuelCol(pc){return pc<=25?'var(--red)':pc>50?'var(--green)':'var(--amber)';}
+function fuelCol(pc){return pc<=30?'var(--red)':pc>50?'var(--green)':'var(--amber)';}
 function lastRec(carId){var l=recsOf(carId);return l[l.length-1]||null;}
 /* ตำแหน่งรถ = ปลายทางของรายการล่าสุด (ถ้าไม่มี ใช้จุดสุดท้ายของเส้นทาง) */
 var LOCS=['ระยอง','หนองยายบู่','60 ไร่','ซอย 5','บ่อวิน','ออฟฟิศ'];
@@ -724,7 +724,7 @@ function miniGauge(r){
   var pc=fpct(r);
   if(pc==null)return '<div class="mg"><span class="e" style="color:var(--red)">E</span><div class="bars">'+'<i></i>'.repeat(10)+'</div><span class="e">F</span><span class="mono" style="font-size:12px;width:44px;text-align:right">—</span></div>';
   var f=Math.round(pc/10), h='';for(var i=1;i<=10;i++)h+='<i class="'+(i<=f?'on':'')+'"></i>';
-  return '<div class="mg'+(pc<=25?' low':pc>50?' hi':'')+'"><span class="e" style="color:var(--red)">E</span><div class="bars">'+h+'</div><span class="e">F</span><span class="mono" style="font-size:12px;font-weight:600;width:44px;text-align:right">'+flab(r)+'</span></div>';
+  return '<div class="mg'+(pc<=30?' low':pc>50?' hi':'')+'"><span class="e" style="color:var(--red)">E</span><div class="bars">'+h+'</div><span class="e">F</span><span class="mono" style="font-size:12px;font-weight:600;width:44px;text-align:right">'+flab(r)+'</span></div>';
 }
 
 function renderHome(){
@@ -769,7 +769,7 @@ function updateForm(){
   // gauge
   var segs='';for(var i=1;i<=10;i++)segs+='<button aria-label="น้ำมัน '+FN[i]+'" class="'+(S.fuel!=null&&i<=S.fuel?'on':'')+'" onclick="setFuel('+i+')"></button>';
   document.getElementById('segs').innerHTML=segs;
-  document.getElementById('gauge').classList.toggle('low',S.fuel!=null&&S.fuel<=2);
+  document.getElementById('gauge').classList.toggle('low',S.fuel!=null&&S.fuel<=3);
   document.getElementById('gauge').classList.toggle('hi',S.fuel!=null&&S.fuel>5);
   document.getElementById('fuelTxt').textContent=S.fuel==null?(S.editing&&S.old?'เดิม '+flab(S.old)+' · แตะเพื่อเปลี่ยน':'แตะเลือก'):FN[S.fuel];
   document.getElementById('lowNote').hidden=!(S.fuel!=null&&S.fuel<=2);
