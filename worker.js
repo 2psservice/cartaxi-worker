@@ -216,7 +216,8 @@ async function lineApi(env, path, body) {
 }
 async function lineReply(env, token, messages) {
   if (!token) return;
-  await lineApi(env, '/v2/bot/message/reply', { replyToken: token, messages: messages.slice(0, 5) });
+  const r = await lineApi(env, '/v2/bot/message/reply', { replyToken: token, messages: messages.slice(0, 5) });
+  if (!r.ok) await putJson(env, 'data/line/error.json', { at: new Date().toISOString(), error: 'reply ' + r.status + ' ' + (await r.text()).slice(0, 400) }).catch(() => {});
 }
 function textMsg(t) { return { type: 'text', text: String(t).slice(0, 4900) }; }
 async function displayName(env, src) {
@@ -419,11 +420,13 @@ export default {
       // ---------- LINE webhook: จำ groupId ของกลุ่มที่เชิญบอทเข้าไป ----------
       if (m === 'POST' && path === '/line/webhook') {
         const body = await req.text();
-        if (!env.LINE_SECRET) return json(env, { ok: true, note: 'ตั้ง LINE_SECRET ก่อน บอทจึงจะทำงาน' });
-        if (!(await hmacOk(env, body, req.headers.get('x-line-signature') || ''))) return fail(env, 401, 'bad signature');
+        const logHit = (o) => putJson(env, 'data/line/last.json', { at: new Date().toISOString(), ...o }).catch(() => {});
+        if (!env.LINE_SECRET) { await logHit({ step: 'no LINE_SECRET' }); return json(env, { ok: true, note: 'ตั้ง LINE_SECRET ก่อน บอทจึงจะทำงาน' }); }
+        if (!(await hmacOk(env, body, req.headers.get('x-line-signature') || ''))) { await logHit({ step: 'bad signature' }); return fail(env, 401, 'bad signature'); }
         let j = {}; try { j = JSON.parse(body); } catch {}
         const evs = (j.events || []).slice(0, 20);
-        ctx.waitUntil((async () => { for (const ev of evs) { try { await handleLineEvent(env, ev, url.origin); } catch (e) {} } })());
+        await logHit({ step: 'received', events: evs.map((e) => ({ type: e.type, msg: e.message && e.message.type, text: e.message && e.message.text ? String(e.message.text).slice(0, 40) : undefined, src: e.source && e.source.type })) });
+        ctx.waitUntil((async () => { for (const ev of evs) { try { await handleLineEvent(env, ev, url.origin); } catch (e) { await putJson(env, 'data/line/error.json', { at: new Date().toISOString(), error: String(e && e.stack || e).slice(0, 800) }).catch(() => {}); } } })());
         return json(env, { ok: true });
       }
 
@@ -433,6 +436,24 @@ export default {
       const role = roleOf(req, env);
       if (!role) return fail(env, 401, 'รหัสแอปไม่ถูกต้อง');
       const seg = path.split('/').slice(2); // หลัง /api/
+
+      // GET /api/line/status?pin=88888888  ดูว่าบอทพร้อมไหม และรับ webhook ล่าสุดเมื่อไร
+      if (m === 'GET' && seg[0] === 'line' && seg[1] === 'status') {
+        const pin = url.searchParams.get('pin') || '';
+        if (!(pin === '88888888' || (env.ADMIN_KEY && pin === env.ADMIN_KEY))) return fail(env, 403, 'รหัสไม่ถูกต้อง');
+        let bot = null;
+        if (env.LINE_TOKEN) { try { const r = await lineApi(env, '/v2/bot/info'); bot = r.ok ? await r.json() : { error: r.status + ' ' + (await r.text()).slice(0, 200) }; } catch (e) { bot = { error: String(e) }; } }
+        let wh = null;
+        if (env.LINE_TOKEN) { try { const r = await lineApi(env, '/v2/bot/channel/webhook/endpoint'); wh = r.ok ? await r.json() : { error: r.status }; } catch (e) { wh = { error: String(e) }; } }
+        const pend = await env.BUCKET.list({ prefix: 'data/line/pending/', limit: 20 });
+        return json(env, {
+          hasToken: !!env.LINE_TOKEN, hasSecret: !!env.LINE_SECRET, hasAI: !!env.AI,
+          bot: bot && { name: bot.displayName, basicId: bot.basicId, chatMode: bot.chatMode, error: bot.error },
+          webhook: wh, target: await getJson(env, 'data/line/target.json', null),
+          lastWebhook: await getJson(env, 'data/line/last.json', null), lastError: await getJson(env, 'data/line/error.json', null),
+          pending: pend.objects.map((o) => o.key),
+        });
+      }
 
       // GET /api/line/test?pin=88888888  ส่งการ์ดทดสอบเข้า LINE
       if (m === 'GET' && seg[0] === 'line' && seg[1] === 'test') {
