@@ -307,7 +307,7 @@ function parseDash(out) {
   if (v && typeof v === 'object') { j = v; txt = JSON.stringify(v); }
   else {
     txt = String(v == null ? '' : v);
-    const m = txt.match(/\{[^{}]*\}/);
+    const all = txt.match(/\{[^{}]*\}/g) || [], m = all.length ? [all[all.length - 1]] : null;   // เอา JSON ก้อนสุดท้าย (กรณี AI อธิบายก่อนตอบ)
     try { j = m ? JSON.parse(m[0]) : {}; } catch {}
   }
   const kind = ['dash', 'bill', 'slip', 'other'].includes(String(j.kind)) ? String(j.kind) : null;
@@ -339,9 +339,9 @@ async function readDash(env, bytes) {
   if (!res.kind) res.kind = res.odo != null ? 'dash' : res.liters != null || res.cost != null ? 'bill' : 'other';
   if (res.kind === 'dash' && !res.fuel) {   // น้ำมัน 0/อ่านไม่ได้ = น่าสงสัย ถามซ้ำเฉพาะเกจน้ำมัน
     try {
-      const out = await aiRun(env, '@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: FUEL_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 });
+      const out = await aiRun(env, '@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: FUEL_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 500, temperature: 0 });
       const r = parseDash(out);
-      res.log.push('fuel-recheck: ' + r.raw);
+      res.log.push('fuel-recheck: ' + (r.raw.length > 190 ? '…' + String(typeof out === 'object' && out && 'response' in out ? out.response : out).slice(-160) : r.raw));
       if (r.fuel) res.fuel = r.fuel;
     } catch (e) { res.log.push('fuel-recheck ERR ' + String(e && e.message || e).slice(0, 120)); }
   }
