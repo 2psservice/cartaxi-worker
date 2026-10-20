@@ -567,20 +567,23 @@ async function fleetTable(env, origin, hiId, head) {
       cell(tOut ? nf(tOut.odo) : '—', { flex: 4, align: 'end', color: tOut ? tc : '#9CA3AF', weight: hi && !tIn ? 'bold' : 'regular' }),
       cell(tIn ? nf(tIn.odo) : '—', { flex: 4, align: 'end', color: tIn ? tc : '#9CA3AF', weight: hi && tIn ? 'bold' : 'regular' }),
       cell(dist, { flex: 3, align: 'end', color: dist === '—' ? '#9CA3AF' : tc }),
-      { type: 'box', layout: 'vertical', flex: 5, height: '18px', backgroundColor: '#E5E7EB', cornerRadius: '9px', contents: [   // หลอดน้ำมัน มีตัวเลข % อยู่ในหลอด
-        { type: 'box', layout: 'vertical', position: 'absolute', offsetTop: '0px', offsetStart: '0px', height: '18px', width: Math.max(0, Math.min(100, fp || 0)) + '%', backgroundColor: col, cornerRadius: '9px', contents: [] },
-        { type: 'text', text: fp == null ? '—' : fp + '%', size: 'xxs', weight: 'bold', align: 'center', gravity: 'center', position: 'absolute', offsetTop: '0px', offsetStart: '0px', offsetEnd: '0px', offsetBottom: '0px',
-          color: fp == null ? '#9CA3AF' : fp >= 50 ? '#FFFFFF' : fp <= 25 ? '#C8372D' : '#111827' },
+      { type: 'box', layout: 'horizontal', flex: 5, spacing: 'xs', alignItems: 'center', contents: [
+        { type: 'box', layout: 'vertical', flex: 3, height: '10px', backgroundColor: '#E5E7EB', cornerRadius: '5px', contents: [
+          { type: 'box', layout: 'vertical', height: '10px', width: Math.max(0, Math.min(100, fp || 0)) + '%', backgroundColor: col, cornerRadius: '5px', contents: [] },
+        ] },
+        cell(fp == null ? '—' : fp + '%', { flex: 2, align: 'end', size: 'xxs', color: fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#111827' }),
       ] },
       stBox,
     ] });
     // หมายเหตุของวันนั้น (ตัดข้อความอัตโนมัติของระบบออก) ขึ้นบรรทัดใหม่ใต้แถวรถ
     const notes = dayNotes([tOut, tIn]);
-    if (notes.length) {
+    const waiting = open && open.status === 'waiting';
+    if (notes.length || waiting) {   // แถวรถ + แถวหมายเหตุ (ถ้ามี) · รอซ่อม = แดงทั้งแถว
       const main = rows.pop(); delete main.backgroundColor; delete main.cornerRadius;
-      rows.push({ type: 'box', layout: 'vertical', cornerRadius: '6px', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [main,
-        { type: 'box', layout: 'vertical', paddingStart: '6px', paddingEnd: '6px', paddingBottom: '6px', contents: [cell('📝 ' + notes.join(' · '), { size: 'xxs', color: old ? '#9CA3AF' : '#B45309', wrap: true })] },
-      ] });
+      if (waiting) { const red = (x) => { if (x.type === 'text') x.color = '#C8372D'; (x.contents || []).forEach(red); }; red(main); }
+      rows.push({ type: 'box', layout: 'vertical', cornerRadius: '6px', backgroundColor: waiting ? '#FDE8E6' : hi ? '#E7F5EC' : '#FFFFFF', contents: [main].concat(notes.length ? [
+        { type: 'box', layout: 'vertical', paddingStart: '6px', paddingEnd: '6px', paddingBottom: '6px', contents: [cell('📝 ' + notes.join(' · '), { size: 'xxs', color: waiting ? '#C8372D' : old ? '#9CA3AF' : '#B45309', wrap: true })] },
+      ] : []) });
     }
     rows.push({ type: 'separator', color: '#EEEEEE' });
   }
