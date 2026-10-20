@@ -575,9 +575,7 @@ async function fleetTable(env, origin, hiId, head) {
       stBox,
     ] });
     // หมายเหตุของวันนั้น (ตัดข้อความอัตโนมัติของระบบออก) ขึ้นบรรทัดใหม่ใต้แถวรถ
-    const AUTO = /อ่านจากรูป|เลขไมล์พิมพ์ใน LINE|เติมน้ำมัน \(เต็มถัง\)|น้ำมันประมาณ/;
-    const notes = [];
-    for (const r of [tOut, tIn]) if (r && r.note) for (const t of String(r.note).split(' · ')) { const x = t.trim(); if (x && !AUTO.test(x) && !notes.includes(x)) notes.push(x); }
+    const notes = dayNotes([tOut, tIn]);
     if (notes.length) {
       const main = rows.pop(); delete main.backgroundColor; delete main.cornerRadius;
       rows.push({ type: 'box', layout: 'vertical', cornerRadius: '6px', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [main,
@@ -626,7 +624,7 @@ async function fleetSummary(env, origin) {
           { type: 'text', text: last ? nf(last.odo) + ' กม.' : 'ยังไม่มีข้อมูล', size: 'sm', weight: 'bold', color: '#111827' },
           { type: 'text', text: ((loc ? '📍 ' + loc + ' · ' : '') + (last ? 'ล่าสุด ' + thDay(last.date).replace(/ \d+$/, '') : '')) || '—', size: 'xxs', color: '#6B7280', wrap: true },
           { type: 'text', text: today, size: 'xxs', color: open && open.status === 'waiting' ? '#C8372D' : (tOut ? '#1F8A4C' : '#B45309') },
-        ] },
+        ].concat(dayNotes(l.filter((r) => last && r.date === last.date)).length ? [{ type: 'text', text: '📝 ' + dayNotes(l.filter((r) => last && r.date === last.date)).join(' · '), size: 'xxs', color: '#B45309', wrap: true }] : []) },
         { type: 'box', layout: 'vertical', flex: 4, spacing: 'xs', contents: [
           { type: 'text', text: fp == null ? '—' : fp + '%', size: 'sm', weight: 'bold', align: 'end', color: col },
           { type: 'box', layout: 'vertical', height: '8px', backgroundColor: '#E5E7EB', cornerRadius: '4px', contents: [
@@ -660,6 +658,13 @@ async function fleetSummary(env, origin) {
 
 /* ===== หมายเหตุ/ค่าใช้จ่ายอื่น เช่น "สำรองจ่ายค่าน้ำมันเครื่องเบอร์ 11 แล้วครับ" + รูปใบเสร็จ → ใส่หมายเหตุในรายการล่าสุดของรถคันนั้น ===== */
 const NOTE_RE = /สำรองจ่าย|ออกเงิน|น้ำมันเครื่อง|ค่าซ่อม|ค่าอะไหล่|ค่าล้าง|ค่าทางด่วน|ค่าจอด|ค่าปะยาง|ค่ายาง|ค่าแบต|หมายเหตุ/;
+const THD = (t) => String(t || '').replace(/[๐-๙]/g, (d) => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(d)));
+function dayNotes(list) {   // หมายเหตุของเที่ยวในวันนั้น ตัดข้อความอัตโนมัติของระบบออก
+  const AUTO = /อ่านจากรูป|เลขไมล์พิมพ์ใน LINE|เติมน้ำมัน \(เต็มถัง\)|น้ำมันประมาณ/;
+  const out = [];
+  for (const r of list) if (r && r.note) for (const t of String(r.note).split(' · ')) { const x = t.trim(); if (x && !AUTO.test(x) && !out.includes(x)) out.push(x); }
+  return out;
+}
 function noteLine(n) { return n.text + (n.amount ? ' ' + nf(n.amount) + ' บ.' : ''); }
 async function latestRecKey(env, carId) {
   const recs = await carRecords(env, carId);
@@ -679,9 +684,9 @@ async function tryNote(env, uid, replyToken, origin) {
   if (!rec) { await env.BUCKET.delete(nk); return false; }
   rec.notes = rec.notes || [];
   let n = rec.notes.find((x) => x.id === pn.id);
-  if (!n) { n = { id: pn.id, time: pn.time, by: pn.name, text: pn.text, amount: null, photo: null }; rec.notes.push(n); }
+  if (!n) { n = { id: pn.id, time: pn.time, by: pn.name, text: pn.text, amount: pn.textAmt || null, photo: null }; rec.notes.push(n); }
   if (img) {
-    n.amount = img.cost || img.amount || null;
+    n.amount = pn.textAmt || img.cost || img.amount || null;
     n.photo = img.photo ? origin + '/photos/' + img.photo : null;
     const k = u.keys.find((x) => x.endsWith('img-' + img.id + '.json'));
     for (const kk of u.keys) { const x = await getJson(env, kk, null); if (x && x.photo === img.photo && kk.includes('/img-')) await env.BUCKET.delete(kk); }
@@ -693,7 +698,7 @@ async function tryNote(env, uid, replyToken, origin) {
   const cars = await getJson(env, 'data/cars.json', []);
   const car = (cars || []).find((c) => c.id === rec.carId) || { plate: rec.carId };
   await lineReply(env, replyToken, [textMsg('📝 เพิ่มหมายเหตุรถ ' + car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ' ' + thDay(rec.date) + ')\n' + noteLine(n) +
-    (img ? (n.amount ? '' : '\n(อ่านยอดเงินจากใบเสร็จไม่ได้ แก้ในแอปได้)') + '\n🧾 แนบรูปใบเสร็จแล้ว' : '\nถ้ามีใบเสร็จ ส่งรูปตามมาได้ภายใน 10 นาที'))]);
+    (img ? (n.amount ? '' : '\n(ไม่พบยอดเงิน พิมพ์ยอดในข้อความ หรือแก้ในแอปได้)') + '\n📎 แนบรูปแล้ว' : '\nถ้ามีใบเสร็จ/รูป ส่งตามมาได้ภายใน 10 นาที'))]);
   return true;
 }
 
@@ -731,12 +736,15 @@ async function handleLineEvent(env, ev, origin) {
   }
   const cars = await getJson(env, 'data/cars.json', []);
   if (NOTE_RE.test(msg.text || '')) {   // หมายเหตุ/ค่าใช้จ่ายอื่นของรถ
-    const pc = parseCarText(String(msg.text).replace(/@\S+/g, ' '), cars);
+    const raw = THD(msg.text).replace(/@\S+/g, ' ');
+    const pc = parseCarText(raw.replace(/[^\S\n]+/g, ' ').match(/(เบอร์|รถ|คัน)\s*\d{1,3}/) ? raw.match(/(เบอร์|รถ|คัน)\s*\d{1,3}/)[0] : raw, cars) || parseCarText(raw, cars);
     if (!pc) return;
     const key = await latestRecKey(env, pc.car.id);
+    const amtM = raw.replace(/(เบอร์|รถ|คัน)\s*\d{1,3}/g, ' ').match(/\d[\d,]*(\.\d+)?/);
+    const textAmt = amtM ? Number(amtM[0].replace(/,/g, '')) || null : null;
     if (!key) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการของรถ ' + pc.car.plate + ' ให้ใส่หมายเหตุ ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
-    const text = String(msg.text).replace(/@\S+/g, '').replace(/(เบอร์|รถ|คัน)\s*\d{1,3}/g, ' ').replace(/\s*(แล้ว)?\s*(ครับ|คับ|ค่ะ|คะ|นะ|จ้า|จ้ะ)+\s*$/g, '').replace(/\s+/g, ' ').trim();
-    await putJson(env, PDIR(uid) + 'note.json', { at: Date.now(), id: rid(), key, text, time: bkkNow().time, name: await displayName(env, src), fresh: true });
+    const text = raw.replace(/(เบอร์|รถ|คัน)\s*\d{1,3}/g, ' ').replace(amtM ? amtM[0] : '\u0000', ' ').replace(/💸|💰|💵|฿|บาท|บ\./g, ' ').replace(/\s*(แล้ว)?\s*(ครับ|คับ|ค่ะ|คะ|นะ|จ้า|จ้ะ)+\s*$/g, '').replace(/\s+/g, ' ').trim();
+    await putJson(env, PDIR(uid) + 'note.json', { at: Date.now(), id: rid(), key, text, textAmt, time: bkkNow().time, name: await displayName(env, src), fresh: true });
     await tryNote(env, uid, ev.replyToken, origin);
     return;
   }
