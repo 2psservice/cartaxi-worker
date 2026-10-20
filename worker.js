@@ -740,7 +740,7 @@ async function handleLineEvent(env, ev, origin) {
     return;
   }
   if (msg.type !== 'text') return;
-  if (/^\s*(สรุป|สรุปรถ|สถานะรถ|รถทั้งหมด|สรุปน้ำมัน|สรุปไมล์)\s*$/.test(msg.text || '')) {
+  if (/^\s*(สรุป\S*|สถานะ\S*|รถทั้งหมด|รถทุกคัน|ทุกคัน|ดูรถ|ตารางรถ|ตาราง)\s*(ครับ|คับ|ค่ะ|คะ|หน่อย)*\s*$/.test(noMention(msg))) {
     const nw = bkkNow();
     await lineReply(env, ev.replyToken, [await fleetTable(env, origin, '', '🚗 สรุปรถทุกคัน · ' + thDay(nw.date) + ' ' + nw.time + ' น.')]);
     return;
@@ -790,8 +790,10 @@ async function handleLineEvent(env, ev, origin) {
   }
   await putJson(env, PDIR(uid) + 'car.json', { at: Date.now(), carId: p.car.id, typedOdo: p.odo || (keep ? keep.typedOdo : null), name: (keep && keep.name) || await displayName(env, src) });
   const u = await listUser(env, uid);
-  if (!u.imgs.length) {
-    if (p.odo) await lineReply(env, ev.replyToken, [textMsg('รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย')]);
+  if (!u.imgs.length) {   // พิมพ์เบอร์รถอย่างเดียว ยังไม่มีรูป → ตอบการ์ดตาราง (เน้นคันนั้น)
+    await lineReply(env, ev.replyToken, [await fleetTable(env, origin, p.car.id, p.odo
+      ? 'รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย'
+      : 'รถ ' + p.car.plate + ' · ส่งรูปหน้าปัดเพื่อบันทึกเลขไมล์/น้ำมัน')]);
     return;
   }
   await tryComplete(env, uid, ev.replyToken, origin);
