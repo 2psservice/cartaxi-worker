@@ -790,10 +790,8 @@ async function handleLineEvent(env, ev, origin) {
   }
   await putJson(env, PDIR(uid) + 'car.json', { at: Date.now(), carId: p.car.id, typedOdo: p.odo || (keep ? keep.typedOdo : null), name: (keep && keep.name) || await displayName(env, src) });
   const u = await listUser(env, uid);
-  if (!u.imgs.length) {   // พิมพ์เบอร์รถอย่างเดียว ยังไม่มีรูป → ตอบการ์ดตาราง (เน้นคันนั้น)
-    await lineReply(env, ev.replyToken, [await fleetTable(env, origin, p.car.id, p.odo
-      ? 'รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย'
-      : 'รถ ' + p.car.plate + ' · ส่งรูปหน้าปัดเพื่อบันทึกเลขไมล์/น้ำมัน')]);
+  if (!u.imgs.length) {   // พิมพ์เบอร์รถอย่างเดียว ยังไม่มีรูป → เงียบ รอรูปหน้าปัด (พิมพ์เบอร์+เลขไมล์ ตอบรับสั้นๆ)
+    if (p.odo) await lineReply(env, ev.replyToken, [textMsg('รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย')]);
     return;
   }
   await tryComplete(env, uid, ev.replyToken, origin);
