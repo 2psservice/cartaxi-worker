@@ -287,9 +287,15 @@ async function aiRun(env, model, input) {
   }
 }
 function parseDash(out) {
-  const txt = String(out && (out.response ?? out.result ?? (typeof out === 'string' ? out : JSON.stringify(out))) || '');
-  const m = txt.match(/\{[^{}]*\}/);
-  let j = {}; try { j = m ? JSON.parse(m[0]) : {}; } catch {}
+  let v = out && typeof out === 'object' && 'response' in out ? out.response : out;
+  if (v && typeof v === 'object' && v.choices) v = v.choices[0] && v.choices[0].message && v.choices[0].message.content;
+  let j = {}, txt;
+  if (v && typeof v === 'object') { j = v; txt = JSON.stringify(v); }   // บางโมเดลส่ง JSON เป็นอ็อบเจ็กต์มาเลย
+  else {
+    txt = String(v == null ? '' : v);
+    const m = txt.match(/\{[^{}]*\}/);
+    try { j = m ? JSON.parse(m[0]) : {}; } catch {}
+  }
   const odo = Number.isFinite(Number(j.odo)) && Number(j.odo) > 0 ? Math.round(Number(j.odo)) : null;
   let fuel = j.fuel == null || j.fuel === '' || !Number.isFinite(Number(j.fuel)) ? null : Math.max(0, Math.min(100, Math.round(Number(j.fuel) / 10) * 10));
   return { odo, fuel, raw: txt.slice(0, 160) };
@@ -300,8 +306,7 @@ async function readDash(env, bytes) {
   const url = 'data:image/jpeg;base64,' + b64(bytes);
   const tries = [
     ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 }],
-    ['@cf/google/gemma-3-12b-it', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 60, temperature: 0 }],
-    [VISION_MODEL, { messages: [{ role: 'user', content: DASH_PROMPT }], image: [...bytes], max_tokens: 60, temperature: 0 }],
+    [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 60, temperature: 0 }],
   ];
   const res = { odo: null, fuel: null, log: [] };
   for (const [model, input] of tries) {
