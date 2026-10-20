@@ -756,6 +756,10 @@ async function handleLineEvent(env, ev, origin) {
   if (!p) return;
   const old = await getJson(env, PDIR(uid) + 'car.json', null);
   const keep = old && Date.now() - old.at < PAIR_MS && old.carId === p.car.id ? old : null;
+  if (old && old.carId !== p.car.id) {   // เปลี่ยนเป็นรถคันใหม่: รูปที่ส่งก่อนพิมพ์เบอร์คันเดิมเป็นของคันเดิม ไม่เอามาปน
+    const pg = await env.BUCKET.list({ prefix: PDIR(uid) + 'img-', limit: 100 });
+    for (const o of pg.objects) { const x = await getJson(env, o.key, null); if (x && x.at <= old.at) await env.BUCKET.delete(o.key); }
+  }
   await putJson(env, PDIR(uid) + 'car.json', { at: Date.now(), carId: p.car.id, typedOdo: p.odo || (keep ? keep.typedOdo : null), name: (keep && keep.name) || await displayName(env, src) });
   const u = await listUser(env, uid);
   if (!u.imgs.length) {
