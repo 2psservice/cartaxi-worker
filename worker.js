@@ -690,8 +690,10 @@ export default {
             const model = MODELS[mk] || (mk.startsWith('@cf/') ? mk : null);
             if (!model) return { img: n, err: 'unknown model' };
             const input = mk === 'llama32' || url.searchParams.get('raw') ? { prompt, image: [...bytes], max_tokens: 600, temperature: 0 }
-              : { messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64(bytes) } }] }], max_tokens: 600, temperature: 0 };
+              : { messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64(bytes) } }] }], max_tokens: Number(url.searchParams.get('mt') || 600), temperature: 0 };
+            if (url.searchParams.get('nothink')) input.chat_template_kwargs = { enable_thinking: false };
             const o = await aiRun(env, model, input);
+            if (o && o.choices) { const c = o.choices[0] || {}; const msg = c.message || {}; return { img: n, content: msg.content, tail: String(msg.reasoning || msg.reasoning_content || '').slice(-300), finish: c.finish_reason, usage: o.usage && { out: o.usage.completion_tokens, neurons: o.usage.neurons } }; }
             return { img: n, raw: typeof o === 'object' && o && 'response' in o ? o.response : o };
           } catch (e) { return { img: n, err: String(e && e.message || e).slice(0, 200) }; }
         }));
