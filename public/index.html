@@ -312,6 +312,7 @@ if(window.IN_LINE){
   <div id="tripBar" class="sec"></div>
 
   <div id="dForm" class="phone" style="gap:22px">
+    <div id="editBanner" class="note" hidden style="background:#FFF7E6;border:1px solid #E8A317;color:#5B4100;line-height:1.6"></div>
     <div class="sec" id="secName">
       <label class="lab" for="drvName">1 · ชื่อผู้ขับ <i class="req">*</i></label>
       <input id="drvName" class="inp" placeholder="ชื่อ-นามสกุล">
@@ -341,7 +342,7 @@ if(window.IN_LINE){
       <div class="lab">5 · รูปยืนยัน</div>
       <div class="photos">
         <div id="phOdo" class="ph"><img id="imgOdo" alt="" hidden><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><b>หน้าปัดเลขไมล์ <i class="req">*</i></b><small id="phOdoTx">บังคับ · ต้องแนบ</small><div class="pbtns"><label class="pb"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>ถ่ายรูป<input type="file" accept="image/*" capture="environment" onchange="takePhoto(this,'odo')"></label><label class="pb"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>อัลบั้ม<input type="file" accept="image/*" onchange="takePhoto(this,'odo')"></label></div></div>
-        <div id="phBill" class="ph"><img id="imgBill" alt="" hidden><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><b>บิลเติมน้ำมัน</b><small id="phBillTx">ไม่บังคับ · แนบเมื่อเติม</small><div class="pbtns"><label class="pb"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>ถ่ายรูป<input type="file" accept="image/*" capture="environment" onchange="takePhoto(this,'bill')"></label><label class="pb"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>อัลบั้ม<input type="file" accept="image/*" onchange="takePhoto(this,'bill')"></label></div></div>
+        <div id="phBill" class="ph"><img id="imgBill" alt="" hidden><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><b>บิลเติมน้ำมัน</b><small id="phBillTx">ไม่บังคับ · แนบเมื่อเติม</small><button id="rmBillBtn" type="button" hidden onclick="S.photoBill=null;updateForm()" style="margin:4px 0;font-size:12px;color:#A12A21;background:none;border:1px solid #C8372D;border-radius:6px;padding:3px 8px">ลบบิลนี้ (ไม่ได้เติม)</button><div class="pbtns"><label class="pb"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>ถ่ายรูป<input type="file" accept="image/*" capture="environment" onchange="takePhoto(this,'bill')"></label><label class="pb"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>อัลบั้ม<input type="file" accept="image/*" onchange="takePhoto(this,'bill')"></label></div></div>
       </div>
       <div id="refillBox" class="sec" hidden>
         <label class="lab" for="liters">เติมกี่ลิตร (ไม่บังคับ แต่ช่วยให้คำนวณน้ำมันแม่นขึ้น)</label>
@@ -662,13 +663,18 @@ function renderDriver(){
   document.getElementById('dDone').hidden=!showDone||locked;
   if(locked)return;
   if(showDone){renderDone(today);return;}
+  // แก้ไข: ช่องว่าง = ใช้ข้อมูลเดิม เปลี่ยนเฉพาะช่องที่กรอกใหม่
   if(S.editing&&today&&!S._loaded){
-    document.getElementById('odoIn').value=today.odo;document.getElementById('drvName').value=today.driver;
-    S.fuel=f10(today);S.photoOdo=today.photoOdo;S.photoBill=today.photoBill;
-    document.getElementById('liters').value=today.liters||'';document.getElementById('note').value=today.note||'';document.getElementById('route').value=today.route||'';document.getElementById('cost').value=today.cost!=null?today.cost:'';S._loaded=true;
+    S.old=today;S.fuel=null;S.photoOdo=today.photoOdo;S.photoBill=today.photoBill;
+    var ph={odoIn:today.odo!=null?String(today.odo):'',drvName:today.driver||'',liters:today.liters!=null?String(today.liters):'',cost:today.cost!=null?String(today.cost):'',note:today.note||'',route:today.route||''};
+    Object.keys(ph).forEach(function(i){var el=document.getElementById(i);el.value='';el.dataset.ph0=el.dataset.ph0!=null?el.dataset.ph0:(el.placeholder||'');el.placeholder=ph[i]?'เดิม: '+ph[i]:el.dataset.ph0;});
+    S._loaded=true;
   }
+  if(!S.editing){S.old=null;['odoIn','drvName','liters','cost','note','route'].forEach(function(i){var el=document.getElementById(i);if(el.dataset.ph0!=null){el.placeholder=el.dataset.ph0;delete el.dataset.ph0;}});}
+  var eb=document.getElementById('editBanner');eb.hidden=!(S.editing&&S.old);
+  if(S.editing&&S.old)eb.innerHTML='<b>กำลังแก้ไข'+TRIP[S.trip||'out']+'</b> · กรอกเฉพาะช่องที่จะเปลี่ยน ช่องที่เว้นว่างใช้ข้อมูลเดิม<br><span style="font-size:12px">เดิม: ไมล์ '+fmt(S.old.odo)+' · น้ำมัน '+flab(S.old)+' · '+esc(S.old.driver||'—')+' · '+S.old.time+' น.</span>';
   var c=carById(S.carId), dn=document.getElementById('drvName');
-  if(!dn.value&&c)dn.value=c.driver||'';
+  if(!dn.value&&c&&!S.editing)dn.value=c.driver||'';
   updateForm();
 }
 function pickCar(id){
@@ -765,11 +771,12 @@ function updateForm(){
   document.getElementById('segs').innerHTML=segs;
   document.getElementById('gauge').classList.toggle('low',S.fuel!=null&&S.fuel<=2);
   document.getElementById('gauge').classList.toggle('hi',S.fuel!=null&&S.fuel>5);
-  document.getElementById('fuelTxt').textContent=S.fuel==null?'แตะเลือก':FN[S.fuel];
+  document.getElementById('fuelTxt').textContent=S.fuel==null?(S.editing&&S.old?'เดิม '+flab(S.old)+' · แตะเพื่อเปลี่ยน':'แตะเลือก'):FN[S.fuel];
   document.getElementById('lowNote').hidden=!(S.fuel!=null&&S.fuel<=2);
   // photos
   setPh('Odo',S.photoOdo,'แนบแล้ว · เปลี่ยนได้','บังคับ · ต้องแนบ');
   setPh('Bill',S.photoBill,'แนบแล้ว · เปลี่ยนได้','ไม่บังคับ · แนบเมื่อเติม');
+  var rb=document.getElementById('rmBillBtn');if(rb)rb.hidden=!(S.editing&&S.photoBill);
   document.getElementById('refillBox').hidden=!S.photoBill;
   // validate
   var miss=missingFields(), names=miss.map(function(m){return m[1];});
@@ -782,6 +789,12 @@ function updateForm(){
 function missingFields(){
   var m=[], c=carById(S.carId), p=c?prevRec(c.id,ymd(),S.trip):null;
   var raw=document.getElementById('odoIn').value, num=raw?parseInt(raw,10):null;
+  if(S.editing&&S.old){   // แก้ไข: ไม่บังคับทุกช่อง ตรวจเฉพาะค่าที่กรอกใหม่
+    if(num!=null&&p&&num<p.odo)m.push(['secOdo','เลขไมล์ต้องไม่น้อยกว่า '+fmt(p.odo)]);
+    var cs0=parseFloat(String(document.getElementById('cost').value).replace(/,/g,''));
+    if(S.photoBill&&S.photoBill!==S.old.photoBill&&(isNaN(cs0)||cs0<=0)&&!S.old.cost)m.push(['secPhoto','ราคาน้ำมันตามบิล']);
+    return m;
+  }
   if(!document.getElementById('drvName').value.trim())m.push(['secName','ชื่อผู้ขับ']);
   if(num==null)m.push(['secOdo','เลขไมล์']);
   else if(p&&num<p.odo)m.push(['secOdo','เลขไมล์ต้องไม่น้อยกว่า '+fmt(p.odo)]);
@@ -821,6 +834,24 @@ function submitDaily(){
   var t=ymd(), num=parseInt(document.getElementById('odoIn').value,10), lit=parseFloat(document.getElementById('liters').value);
   var trip=S.trip||'out', ex=recOn(S.carId,t,trip), now=new Date();
   var pv=prevRec(S.carId,t,trip);
+  if(S.editing&&S.old&&ex){   // แก้ไข: เริ่มจากข้อมูลเดิม แล้วทับเฉพาะช่องที่กรอกใหม่
+    var r0=JSON.parse(JSON.stringify(ex)), v=function(i){return document.getElementById(i).value.trim();};
+    if(v('odoIn'))r0.odo=num;
+    r0.km=pv?r0.odo-pv.odo:null;
+    if(v('drvName'))r0.driver=v('drvName');
+    if(S.fuel!=null){r0.fuel=S.fuel;r0.fs=10;}
+    r0.photoOdo=S.photoOdo||r0.photoOdo;
+    if(!S.photoBill){r0.photoBill=null;r0.liters=null;r0.cost=null;}
+    else{r0.photoBill=S.photoBill;
+      if(v('liters')&&!isNaN(lit))r0.liters=lit;
+      if(v('cost'))r0.cost=parseFloat(v('cost').replace(/,/g,''))||r0.cost;}
+    if(v('note'))r0.note=v('note');
+    if(v('route'))r0.route=v('route');
+    DB.records[DB.records.indexOf(ex)]=r0;
+    if(!save()&&!cloud())return;
+    queue('record',r0);
+    S.editing=false;S._loaded=false;S.tried=false;S.old=null;toast('บันทึกการแก้ไข'+TRIP[trip]+'แล้ว');renderDriver();return;
+  }
   var r={id:ex?ex.id:uid(),date:t,trip:trip,km:pv?num-pv.odo:null,time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'),carId:S.carId,
     driver:document.getElementById('drvName').value.trim(),odo:num,fuel:S.fuel,fs:10,liters:(S.photoBill&&!isNaN(lit))?lit:null,cost:S.photoBill?parseFloat(String(document.getElementById('cost').value).replace(/,/g,''))||null:null,
     photoOdo:S.photoOdo,photoBill:S.photoBill,note:document.getElementById('note').value.trim(),route:document.getElementById('route').value.trim()};
