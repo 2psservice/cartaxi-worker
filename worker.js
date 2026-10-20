@@ -498,29 +498,44 @@ async function fleetTable(env, origin, hiId, head) {
   let recs = [];
   for (const m of [now.date.slice(0, 7), pm.toISOString().slice(0, 7)]) recs = recs.concat(await readAll(env, 'data/records/' + m + '/'));
   const ord = (r) => r.date + (r.trip === 'in' ? 'b' : 'a') + (r.time || '');
-  const cell = (t, o) => Object.assign({ type: 'text', text: t, size: 'sm', color: '#111827' }, o || {});
-  const rows = [{ type: 'box', layout: 'horizontal', paddingAll: '8px', backgroundColor: '#F3F4F6', cornerRadius: '6px', contents: [
-    cell('รถ', { flex: 2, color: '#6B7280', size: 'xs' }),
-    cell('เลขไมล์', { flex: 5, color: '#6B7280', size: 'xs', align: 'end' }),
-    cell('น้ำมัน', { flex: 3, color: '#6B7280', size: 'xs', align: 'end' }),
+  const cell = (t, o) => Object.assign({ type: 'text', text: t, size: 'xs', color: '#111827' }, o || {});
+  let old0 = false;
+  const H = (t, f, al) => cell(t, { flex: f, color: '#6B7280', size: 'xxs', align: al || 'start', wrap: true });
+  const rows = [{ type: 'box', layout: 'horizontal', paddingAll: '6px', spacing: 'sm', backgroundColor: '#F3F4F6', cornerRadius: '6px', alignItems: 'center', contents: [
+    H('รถ', 2), H('คนขับ', 4), H('ไมล์ขาไป', 4, 'end'), H('ไมล์ขากลับ', 4, 'end'), H('น้ำมัน', 6, 'center'),
   ] }];
   for (const c of cars) {
     const l = recs.filter((r) => r.carId === c.id).sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
     const last = l[l.length - 1] || null;
+    const day = last ? last.date : '';                       // วันล่าสุดที่มีข้อมูล (ปกติ = วันนี้)
+    const tOut = l.find((r) => r.date === day && r.trip !== 'in');
+    const tIn = l.find((r) => r.date === day && r.trip === 'in');
+    const old = day && day !== now.date;                      // ไม่ใช่ของวันนี้ = ตัวเทา
+    if (old) old0 = true;
+    const tc = old ? '#9CA3AF' : '#111827';
     const fp = fuelPct(last);
+    const col = fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#1F8A4C';
     const hi = c.id === hiId;
-    rows.push({ type: 'box', layout: 'horizontal', paddingAll: '8px', cornerRadius: '6px', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [
-      cell(String(c.plate || c.id), { flex: 2, weight: 'bold' }),
-      cell(last ? nf(last.odo) : '—', { flex: 5, align: 'end', weight: hi ? 'bold' : 'regular' }),
-      cell(fp == null ? 'ไม่มีค่า' : fp + '%', { flex: 3, align: 'end', weight: 'bold', color: fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#111827' }),
+    const drv = (tIn && tIn.driver) || (tOut && tOut.driver) || '—';
+    rows.push({ type: 'box', layout: 'horizontal', paddingAll: '6px', spacing: 'sm', cornerRadius: '6px', alignItems: 'center', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [
+      cell(String(c.plate || c.id), { flex: 2, weight: 'bold', size: 'sm' }),
+      cell(drv, { flex: 4, color: tc, wrap: false }),
+      cell(tOut ? nf(tOut.odo) : '—', { flex: 4, align: 'end', color: tOut ? tc : '#9CA3AF', weight: hi && !tIn ? 'bold' : 'regular' }),
+      cell(tIn ? nf(tIn.odo) : '—', { flex: 4, align: 'end', color: tIn ? tc : '#9CA3AF', weight: hi && tIn ? 'bold' : 'regular' }),
+      { type: 'box', layout: 'horizontal', flex: 6, spacing: 'sm', alignItems: 'center', contents: [
+        { type: 'box', layout: 'vertical', flex: 3, height: '10px', backgroundColor: '#E5E7EB', cornerRadius: '5px', contents: [
+          { type: 'box', layout: 'vertical', height: '10px', width: Math.max(0, Math.min(100, fp || 0)) + '%', backgroundColor: col, cornerRadius: '5px', contents: [] },
+        ] },
+        cell(fp == null ? '—' : fp + '%', { flex: 2, align: 'end', size: 'xxs', color: fp == null ? '#9CA3AF' : fp <= 25 ? '#C8372D' : '#111827' }),
+      ] },
     ] });
     rows.push({ type: 'separator', color: '#EEEEEE' });
   }
   rows.pop();
   const contents = (head ? [cell(head, { size: 'xs', color: '#1F8A4C', weight: 'bold', wrap: true, margin: 'none' }), { type: 'box', layout: 'vertical', height: '8px', contents: [] }] : []).concat(rows);
   return { type: 'flex', altText: (head || 'สรุปรถ') + ' · รถ/เลขไมล์/น้ำมัน', contents: {
-    type: 'bubble', size: 'kilo',
-    body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents },
+    type: 'bubble', size: 'giga',
+    body: { type: 'box', layout: 'vertical', paddingAll: '12px', contents: contents.concat(old0 ? [cell('ตัวเทา = ข้อมูลวันก่อน (วันนี้ยังไม่ส่ง)', { size: 'xxs', color: '#9CA3AF', margin: 'md' })] : []) },
     footer: { type: 'box', layout: 'vertical', paddingAll: '4px', contents: [
       { type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดแอป', uri: origin + '/' } },
     ] },
