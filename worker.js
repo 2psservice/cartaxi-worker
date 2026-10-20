@@ -665,6 +665,12 @@ function dayNotes(list) {   // หมายเหตุของเที่ย�
   for (const r of list) if (r && r.note) for (const t of String(r.note).split(' · ')) { const x = t.trim(); if (x && !AUTO.test(x) && !out.includes(x)) out.push(x); }
   return out;
 }
+function noMention(msg) {   // ตัดชื่อที่ @ แท็กออก (ใช้ตำแหน่งจาก LINE ชื่ออาจมีช่องว่าง/อีโมจิ/ตัวเลข)
+  let t = String(msg.text || '');
+  const ms = ((msg.mention && msg.mention.mentionees) || []).slice().sort((a, b) => b.index - a.index);
+  for (const m of ms) t = t.slice(0, m.index) + ' ' + t.slice(m.index + m.length);
+  return t.replace(/@\S+/g, ' ').replace(/\s+/g, ' ').trim();
+}
 function noteLine(n) { return n.text + (n.amount ? ' ' + nf(n.amount) + ' บ.' : ''); }
 async function latestRecKey(env, carId) {
   const recs = await carRecords(env, carId);
@@ -736,14 +742,14 @@ async function handleLineEvent(env, ev, origin) {
   }
   const cars = await getJson(env, 'data/cars.json', []);
   if (NOTE_RE.test(msg.text || '')) {   // หมายเหตุ/ค่าใช้จ่ายอื่นของรถ
-    const raw = THD(msg.text).replace(/@\S+/g, ' ');
+    const raw = THD(noMention(msg));
     const pc = parseCarText(raw.replace(/[^\S\n]+/g, ' ').match(/(เบอร์|รถ|คัน)\s*\d{1,3}/) ? raw.match(/(เบอร์|รถ|คัน)\s*\d{1,3}/)[0] : raw, cars) || parseCarText(raw, cars);
     if (!pc) return;
     const key = await latestRecKey(env, pc.car.id);
-    const amtM = raw.replace(/(เบอร์|รถ|คัน)\s*\d{1,3}/g, ' ').match(/\d[\d,]*(\.\d+)?/);
-    const textAmt = amtM ? Number(amtM[0].replace(/,/g, '')) || null : null;
+    const amtM = raw.match(/(\d[\d,]*(?:\.\d+)?)\s*(บาท|บ\.|฿)/);   // ยอดเงินในข้อความ ต้องมีคำว่า บาท/บ./฿ ต่อท้าย
+    const textAmt = amtM ? Number(amtM[1].replace(/,/g, '')) || null : null;
     if (!key) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการของรถ ' + pc.car.plate + ' ให้ใส่หมายเหตุ ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
-    const text = raw.replace(/(เบอร์|รถ|คัน)\s*\d{1,3}/g, ' ').replace(amtM ? amtM[0] : '\u0000', ' ').replace(/💸|💰|💵|฿|บาท|บ\./g, ' ').replace(/\s*(แล้ว)?\s*(ครับ|คับ|ค่ะ|คะ|นะ|จ้า|จ้ะ)+\s*$/g, '').replace(/\s+/g, ' ').trim();
+    const text = noMention(msg);   // หมายเหตุ = ข้อความตามที่พิมพ์ (ตัดแค่ชื่อที่แท็ก)
     await putJson(env, PDIR(uid) + 'note.json', { at: Date.now(), id: rid(), key, text, textAmt, time: bkkNow().time, name: await displayName(env, src), fresh: true });
     await tryNote(env, uid, ev.replyToken, origin);
     return;
