@@ -348,9 +348,11 @@ async function readDash(env, bytes) {
     [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 130, temperature: 0 }],
   ];
   const res = { kind: null, odo: null, fuel: null, liters: null, cost: null, amount: null, log: [] };
+  const t0 = Date.now();   // ทำงานเบื้องหลังได้ไม่เกิน ~30 วิ ต้องคุมเวลา
   const done = () => res.kind === 'other' || (res.kind === 'slip' && res.amount != null) || (res.kind === 'bill' && res.liters != null && res.cost != null) || (res.kind === 'dash' && res.odo != null && res.fuel != null);
   for (const [model, input] of tries) {
     if (done()) break;
+    if (model === VISION_MODEL && (res.kind === 'dash' && res.odo != null || Date.now() - t0 > 12000)) break;   // ตัวสำรองช่วยได้น้อย ใช้เฉพาะตอนตัวหลักล้ม
     try {
       const r = parseDash(await aiRun(env, model, input));
       res.log.push(model.split('/').pop() + ': ' + r.raw);
@@ -358,9 +360,9 @@ async function readDash(env, bytes) {
     } catch (e) { res.log.push(model.split('/').pop() + ' ERR ' + String(e && e.message || e).slice(0, 120)); }
   }
   if (!res.kind) res.kind = res.odo != null ? 'dash' : res.liters != null || res.cost != null ? 'bill' : 'other';
-  if (res.kind === 'dash' && !res.fuel) {   // น้ำมัน 0/อ่านไม่ได้ = น่าสงสัย ถามซ้ำเฉพาะเกจน้ำมัน
+  if (res.kind === 'dash' && !res.fuel && Date.now() - t0 < 10000) {   // น้ำมัน 0/อ่านไม่ได้ = น่าสงสัย ถามซ้ำเฉพาะเกจน้ำมัน
     try {
-      const out = await aiRun(env, '@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: FUEL_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 500, temperature: 0 });
+      const out = await aiRun(env, '@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: FUEL_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 350, temperature: 0 });
       const r = parseDash(out);
       res.log.push('fuel-recheck: ' + (r.raw.length > 190 ? '…' + String(typeof out === 'object' && out && 'response' in out ? out.response : out).slice(-160) : r.raw));
       if (r.fuel) res.fuel = r.fuel;
@@ -386,6 +388,7 @@ async function listUser(env, uid) {
   for (const k of out.keys) {
     const x = await getJson(env, k, null); if (!x) continue;
     if (Date.now() - (x.at || 0) > PAIR_MS) { await env.BUCKET.delete(k); continue; }
+    if (x.processing && Date.now() - (x.at || 0) > 90000) { await env.BUCKET.delete(k); continue; }   // อ่านรูปค้าง (เช่น ระบบรีสตาร์ต) เกิน 90 วิ = ทิ้ง ไม่ให้บล็อกรายการอื่น
     if (k.endsWith('/car.json')) out.car = x; else if (k.includes('/img-')) out.imgs.push(x);
   }
   out.imgs.sort((a, b) => (a.set && b.set && a.set.id === b.set.id ? a.set.index - b.set.index : a.at - b.at));
@@ -416,11 +419,15 @@ async function tryComplete(env, uid, replyToken, origin) {
   const dashes = u.imgs.filter((x) => x.kind === 'dash' || (x.kind !== 'bill' && x.odo != null));
   const bills = u.imgs.filter((x) => x.kind === 'bill');
   const bill = bills[bills.length - 1] || null;
-  const readOdo = dashes.reduce((m, x) => (x.odo != null && (m == null || x.odo > m) ? x.odo : m), null);
+  let readOdo = dashes.reduce((m, x) => (x.odo != null && (m == null || x.odo > m) ? x.odo : m), null);
   const recs = await carRecords(env, car.id);
   const now = bkkNow();
   const trip = recs.some((r) => r.date === now.date && r.trip !== 'in') ? 'in' : 'out';
   const prev = recs.filter((r) => (r.date + (r.trip === 'in' ? 'b' : 'a')) < (now.date + (trip === 'in' ? 'b' : 'a'))).pop() || null;
+  if (prev) {   // ตัดรูปหน้าปัดของรถคันอื่นที่ค้างอยู่ (เลขไมล์ห่างจากรถคันนี้มาก) ออก
+    const near = dashes.filter((x) => x.odo == null || (x.odo >= prev.odo - 5000 && x.odo <= prev.odo + MAX_KM_DAY + 5000));
+    if (near.length && near.length < dashes.length) { dashes.length = 0; dashes.push(...near); readOdo = dashes.reduce((m, x) => (x.odo != null && (m == null || x.odo > m) ? x.odo : m), null); }
+  }
   const dashPick = dashes.filter((x) => x.odo === readOdo).pop() || dashes[dashes.length - 1] || null;
   let odo = u.car.typedOdo || readOdo;
   const okOdo = (v) => v && (!prev || (v >= prev.odo && v - prev.odo <= MAX_KM_DAY));
@@ -429,6 +436,7 @@ async function tryComplete(env, uid, replyToken, origin) {
       const obj = x.photo ? await env.BUCKET.get('photos/' + x.photo) : null; if (!obj) continue;
       const v = await readOdoHint(env, new Uint8Array(await obj.arrayBuffer()), prev.odo);
       if (okOdo(v)) { odo = v; break; }
+      break;   // ลองแค่รูปเดียว กันเกินเวลา
     }
   }
   const plate = 'รถ ' + (car.plate || car.id);
