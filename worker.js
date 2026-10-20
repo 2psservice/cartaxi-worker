@@ -282,13 +282,15 @@ const DASH_PROMPT =
   'Look at this photo and classify it.\n' +
   '- "dash": a car instrument cluster / dashboard.\n' +
   '- "bill": a fuel station receipt / tax invoice.\n' +
+  '- "slip": a bank / mobile-banking money transfer slip (e.g. "โอนเงินสำเร็จ").\n' +
   '- "other": anything else.\n' +
   'If "dash": ODOMETER = total distance in km. Digital clusters: the value labelled ODO (ignore TRIP A/B, range, clock, temperature). ' +
   'Analog clusters: the 6-digit rolling counter inside the speedometer (ignore the smaller trip counter). ' +
   'FUEL = fuel gauge (fuel-pump icon, E and F). Analog needle: E=0, 1/4=25, 1/2=50, 3/4=75, F=100, estimate where the needle points. ' +
   'Digital bars: lit bars / total bars x 100. Round to nearest 10. null only if no fuel gauge is visible.\n' +
   'If "bill": LITERS = fuel quantity in litres (the Quantity / จำนวน / ลิตร column), COST = total amount paid in baht (NET TOTAL / จำนวนเงินรวม / Amount).\n' +
-  'Answer with ONLY compact JSON and nothing else: {"kind":"dash|bill|other","odo":<int or null>,"fuel":<int 0-100 or null>,"liters":<number or null>,"cost":<number or null>}';
+  'If "slip": AMOUNT = the transferred amount in baht (จำนวนเงิน).\n' +
+  'Answer with ONLY compact JSON and nothing else: {"kind":"dash|bill|slip|other","odo":<int or null>,"fuel":<int 0-100 or null>,"liters":<number or null>,"cost":<number or null>,"amount":<number or null>}';
 function num(v) { if (v == null || v === '') return null; const n = Number(String(v).replace(/[^\d.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; }
 function parseDash(out) {
   let v = out && typeof out === 'object' && 'response' in out ? out.response : out;
@@ -300,11 +302,11 @@ function parseDash(out) {
     const m = txt.match(/\{[^{}]*\}/);
     try { j = m ? JSON.parse(m[0]) : {}; } catch {}
   }
-  const kind = ['dash', 'bill', 'other'].includes(String(j.kind)) ? String(j.kind) : null;
+  const kind = ['dash', 'bill', 'slip', 'other'].includes(String(j.kind)) ? String(j.kind) : null;
   const odo = num(j.odo) != null ? Math.round(num(j.odo)) : null;
   const fr = j.fuel == null || j.fuel === '' ? null : Number(String(j.fuel).replace(/[^\d.]/g, ''));
   const fuel = fr == null || !Number.isFinite(fr) ? null : Math.max(0, Math.min(100, Math.round(fr / 10) * 10));
-  return { kind, odo, fuel, liters: num(j.liters), cost: num(j.cost), raw: txt.slice(0, 200) };
+  return { kind, odo, fuel, liters: num(j.liters), cost: num(j.cost), amount: num(j.amount), raw: txt.slice(0, 200) };
 }
 /* อ่านรูป: Llama 4 Scout ก่อน ถ้าขาดค่าไหนลอง Llama 3.2 Vision แล้วรวมผล */
 async function readDash(env, bytes) {
@@ -314,14 +316,14 @@ async function readDash(env, bytes) {
     ['@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: [{ type: 'text', text: DASH_PROMPT }, { type: 'image_url', image_url: { url } }] }], max_tokens: 90, temperature: 0 }],
     [VISION_MODEL, { prompt: DASH_PROMPT, image: [...bytes], max_tokens: 90, temperature: 0 }],
   ];
-  const res = { kind: null, odo: null, fuel: null, liters: null, cost: null, log: [] };
-  const done = () => res.kind === 'other' || (res.kind === 'bill' && res.liters != null && res.cost != null) || (res.kind === 'dash' && res.odo != null && res.fuel != null);
+  const res = { kind: null, odo: null, fuel: null, liters: null, cost: null, amount: null, log: [] };
+  const done = () => res.kind === 'other' || (res.kind === 'slip' && res.amount != null) || (res.kind === 'bill' && res.liters != null && res.cost != null) || (res.kind === 'dash' && res.odo != null && res.fuel != null);
   for (const [model, input] of tries) {
     if (done()) break;
     try {
       const r = parseDash(await aiRun(env, model, input));
       res.log.push(model.split('/').pop() + ': ' + r.raw);
-      for (const k of ['kind', 'odo', 'fuel', 'liters', 'cost']) if (res[k] == null && r[k] != null) res[k] = r[k];
+      for (const k of ['kind', 'odo', 'fuel', 'liters', 'cost', 'amount']) if (res[k] == null && r[k] != null) res[k] = r[k];
     } catch (e) { res.log.push(model.split('/').pop() + ' ERR ' + String(e && e.message || e).slice(0, 120)); }
   }
   if (!res.kind) res.kind = res.odo != null ? 'dash' : res.liters != null || res.cost != null ? 'bill' : 'other';
@@ -358,8 +360,10 @@ async function clearUser(env, uid) {
 /* รวมรูป (หน้าปัด/บิล) + เบอร์รถ แล้วบันทึก — เรียกทุกครั้งที่มีรูปอ่านเสร็จหรือมีคนพิมพ์เบอร์รถ */
 async function tryComplete(env, uid, replyToken, origin) {
   const u = await listUser(env, uid);
-  if (!u.car || !u.imgs.length) return false;
   if (u.imgs.some((x) => x.processing)) return false;                       // ยังอ่านรูปไม่เสร็จ
+  u.imgs = u.imgs.filter((x) => x.kind !== 'slip');                         // สลิปโอนเงินไม่ใช่หน้าปัด
+  if (!u.car || !u.imgs.length) return false;
+  if (!u.imgs.some((x) => x.kind === 'dash' || x.kind === 'bill' || x.odo != null) && !u.car.typedOdo) return false;   // ไม่มีรูปหน้าปัด/บิล = ไม่ใช่การส่งเลขไมล์
   const last = u.imgs[u.imgs.length - 1];
   if (last.set && u.imgs.filter((x) => x.set && x.set.id === last.set.id).length < last.set.total) return false;   // อัลบั้มยังมาไม่ครบ
   const claimKey = PDIR(uid) + 'claim.json';
@@ -423,6 +427,25 @@ async function tryComplete(env, uid, replyToken, origin) {
   return true;
 }
 
+/* สลิปโอนค่าน้ำมัน + ข้อความ "ค่าน้ำมันรถ 04" → บันทึกเงินโอนค่าน้ำมันของรถคันนั้น */
+async function tryAdvance(env, uid, replyToken, origin) {
+  const adv = await getJson(env, PDIR(uid) + 'adv.json', null);
+  if (!adv || Date.now() - adv.at > PAIR_MS) return false;
+  const u = await listUser(env, uid);
+  if (u.imgs.some((x) => x.processing)) return false;
+  const slip = u.imgs.filter((x) => x.kind === 'slip').pop();
+  if (!slip) return false;
+  const cars = await getJson(env, 'data/cars.json', []);
+  const car = (cars || []).find((c) => c.id === adv.carId);
+  if (!car) return false;
+  const now = bkkNow();
+  const a = { id: rid(), date: now.date, time: now.time, carId: car.id, amount: slip.amount, by: adv.name || '', photo: slip.photo ? origin + '/photos/' + slip.photo : null, src: 'line' };
+  await putJson(env, 'data/advances/' + now.date.slice(0, 7) + '/' + now.date + '_' + a.id + '.json', a);
+  for (const k of u.keys) { const x = await getJson(env, k, null); if (k.endsWith('/adv.json') || (x && x.kind === 'slip' && x.photo === slip.photo)) await env.BUCKET.delete(k); }
+  await lineReply(env, replyToken, [textMsg('💸 บันทึกโอนค่าน้ำมัน รถ ' + car.plate + (a.amount ? ' · ' + nf(a.amount) + ' บาท' : ' (อ่านยอดเงินไม่ได้ แก้ในแอป)'))]);
+  return true;
+}
+
 async function handleLineEvent(env, ev, origin) {
   const src = ev.source || {};
   if (src.type === 'group' && src.groupId) {
@@ -441,13 +464,14 @@ async function handleLineEvent(env, ev, origin) {
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.byteLength > 6 * 1024 * 1024) { await env.BUCKET.delete(ikey); return; }
     const [photo, ocr] = await Promise.all([savePhoto(env, bytes), readDash(env, bytes)]);
-    await putJson(env, ikey, { at: Date.now(), set, photo, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost });
+    await putJson(env, ikey, { at: Date.now(), set, photo, kind: ocr.kind, odo: ocr.odo, fuel: ocr.fuel, liters: ocr.liters, cost: ocr.cost, amount: ocr.amount });
+    if (await tryAdvance(env, uid, ev.replyToken, origin)) return;
     await tryComplete(env, uid, ev.replyToken, origin);
     return;
   }
   if (msg.type !== 'text') return;
   const cars = await getJson(env, 'data/cars.json', []);
-  const fm = String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%?/);
+  const fm = /ค่าน้ำมัน/.test(msg.text || '') ? null : String(msg.text || '').match(/น้ำมัน\s*(\d{1,3})\s*%/);
   if (fm) {   // แก้ระดับน้ำมัน เช่น "02 น้ำมัน 60%" (มาจากปุ่มด่วน)
     const pc = parseCarText(msg.text.replace(fm[0], ''), cars);
     const v = Math.max(0, Math.min(100, Math.round(parseInt(fm[1], 10) / 10) * 10));
@@ -459,6 +483,13 @@ async function handleLineEvent(env, ev, origin) {
     rec.fuel = v / 10; rec.fs = 10;
     await putJson(env, key, rec);
     await lineReply(env, ev.replyToken, [textMsg('✅ รถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') น้ำมัน ' + v + '% บันทึกแล้ว')]);
+    return;
+  }
+  if (/ค่าน้ำมัน/.test(msg.text || '')) {   // "@พัน ค่าน้ำมันรถ 04 ครับ" + สลิปโอนเงิน = โอนค่าน้ำมันให้รถคันนั้น
+    const pa = parseCarText(String(msg.text).replace(/@\S+/g, ' '), cars);
+    if (!pa) return;
+    await putJson(env, PDIR(uid) + 'adv.json', { at: Date.now(), carId: pa.car.id, name: await displayName(env, src) });
+    await tryAdvance(env, uid, ev.replyToken, origin);
     return;
   }
   const p = parseCarText(msg.text, cars);
@@ -590,6 +621,13 @@ export default {
           if (!prevT && env.LINE_TOKEN && env.LINE_PUSH === 'true') ctx.waitUntil(notifyRepair(env, t, origin).catch(() => {}));
           return json(env, { ok: true });
         }
+      }
+
+      // ---------- เงินโอนค่าน้ำมัน (จากสลิปในกลุ่ม LINE) ----------
+      if (seg[0] === 'advances' && m === 'GET' && seg.length === 1) {
+        const month = url.searchParams.get('month') || '';
+        if (!MONTH_RE.test(month)) return fail(env, 400, 'ระบุเดือนแบบ YYYY-MM');
+        return json(env, await readAll(env, 'data/advances/' + month + '/'));
       }
 
       // ---------- เลขไมล์ / น้ำมัน รายวัน ----------

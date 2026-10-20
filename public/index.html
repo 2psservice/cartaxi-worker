@@ -411,7 +411,7 @@ if(window.IN_LINE){
       </table></div>
       <div class="chead" style="border-top:1px solid var(--ground2)"><h2 id="mSumTitle">สรุปเดือนนี้ รายคัน</h2></div>
       <div class="tbl"><table>
-        <thead><tr><th>ทะเบียน</th><th class="r">เลขไมล์ต้นเดือน</th><th class="r">เลขไมล์ล่าสุด</th><th class="r">วิ่งรวม (กม.)</th><th class="r">เติมรวม (ล.)</th><th class="r">ค่าน้ำมัน (บ.)</th><th class="r">บาท/กม.</th></tr></thead>
+        <thead><tr><th>ทะเบียน</th><th class="r">เลขไมล์ต้นเดือน</th><th class="r">เลขไมล์ล่าสุด</th><th class="r">วิ่งรวม (กม.)</th><th class="r">เติมรวม (ล.)</th><th class="r">ค่าน้ำมัน (บ.)</th><th class="r">โอนค่าน้ำมัน (บ.)</th><th class="r">บาท/กม.</th></tr></thead>
         <tbody id="mRows"></tbody>
       </table></div>
     </div>
@@ -896,30 +896,31 @@ function monthSum(m){
   var out=[];
   DB.cars.forEach(function(c){
     var all=recsOf(c.id), inM=all.filter(function(r){return r.date.slice(0,7)===m;});
-    if(!inM.length){out.push({c:c,start:null,end:null,km:0,lit:0,cost:0,n:0});return;}
+    var adv=(DB.advances||[]).filter(function(a){return a.carId===c.id&&String(a.date).slice(0,7)===m;}).reduce(function(s,a){return s+Number(a.amount||0);},0);
+    if(!inM.length){out.push({c:c,start:null,end:null,km:0,lit:0,cost:0,n:0,adv:adv});return;}
     var before=all.filter(function(r){return r.date.slice(0,7)<m;}), base=before.length?before[before.length-1]:inM[0];
     var end=inM[inM.length-1], km=Math.max(0,end.odo-base.odo), lit=0, cost=0, n=0;
     inM.forEach(function(r){lit+=Number(r.liters||0);if(r.cost){cost+=Number(r.cost);n++;}});
-    out.push({c:c,start:base.odo,end:end.odo,km:km,lit:lit,cost:cost,n:n});
+    out.push({c:c,start:base.odo,end:end.odo,km:km,lit:lit,cost:cost,n:n,adv:adv});
   });
   return out;
 }
 function renderMonthSum(d){
   var m=(d||ymd()).slice(0,7), mt=thDate(m+'-01',{month:'long',year:'numeric'}), l=monthSum(m);
-  var km=0,lit=0,cost=0,n=0,used=0;l.forEach(function(x){km+=x.km;lit+=x.lit;cost+=x.cost;n+=x.n;if(x.km>0)used++;});
+  var km=0,lit=0,cost=0,n=0,used=0,adv=0;l.forEach(function(x){km+=x.km;lit+=x.lit;cost+=x.cost;n+=x.n;adv+=x.adv||0;if(x.km>0)used++;});
   document.getElementById('kMKmL').textContent='ระยะทางรวม '+mt;
   document.getElementById('kMKm').innerHTML=fmt(km)+'<small> กม.</small>';
   document.getElementById('kMKmS').textContent=used?used+' คัน · เฉลี่ย '+fmt(Math.round(km/used))+' กม./คัน':'ยังไม่มีข้อมูลเดือนนี้';
   document.getElementById('kMCostL').textContent='ค่าน้ำมัน '+mt;
   document.getElementById('kMCost').innerHTML=fmt(Math.round(cost))+'<small> บาท</small>';
-  document.getElementById('kMCostS').textContent='เติมรวม '+lit1(lit)+' ล. · '+n+' บิล'+(km>0&&cost>0?' · '+(cost/km).toFixed(2)+' บ./กม.':'');
+  document.getElementById('kMCostS').textContent='เติมรวม '+lit1(lit)+' ล. · '+n+' บิล'+(km>0&&cost>0?' · '+(cost/km).toFixed(2)+' บ./กม.':'')+(adv?' · โอนค่าน้ำมัน '+fmt(Math.round(adv))+' บ.':'');
   document.getElementById('mSumTitle').textContent='สรุป'+mt+' รายคัน';
   document.getElementById('mRows').innerHTML=l.map(function(x){
     return '<tr><td><div class="disp" style="font-size:15px">'+esc(x.c.plate)+'</div></td>'+
       '<td class="mono r">'+(x.start!=null?fmt(x.start):'—')+'</td><td class="mono r">'+(x.end!=null?fmt(x.end):'—')+'</td>'+
       '<td class="mono r" style="font-weight:600">'+(x.km?fmt(x.km):'—')+'</td><td class="mono r">'+(x.lit?lit1(x.lit):'—')+'</td>'+
-      '<td class="mono r" style="font-weight:600">'+(x.cost?fmt(Math.round(x.cost)):'—')+'</td><td class="mono r">'+(x.km>0&&x.cost>0?(x.cost/x.km).toFixed(2):'—')+'</td></tr>';
-  }).join('')+'<tr style="background:var(--ground)"><td><b>รวม</b></td><td></td><td></td><td class="mono r" style="font-weight:700">'+fmt(km)+'</td><td class="mono r" style="font-weight:700">'+lit1(lit)+'</td><td class="mono r" style="font-weight:700">'+fmt(Math.round(cost))+'</td><td class="mono r">'+(km>0&&cost>0?(cost/km).toFixed(2):'—')+'</td></tr>';
+      '<td class="mono r" style="font-weight:600">'+(x.cost?fmt(Math.round(x.cost)):'—')+'</td><td class="mono r">'+(x.adv?fmt(Math.round(x.adv)):'—')+'</td><td class="mono r">'+(x.km>0&&x.cost>0?(x.cost/x.km).toFixed(2):'—')+'</td></tr>';
+  }).join('')+'<tr style="background:var(--ground)"><td><b>รวม</b></td><td></td><td></td><td class="mono r" style="font-weight:700">'+fmt(km)+'</td><td class="mono r" style="font-weight:700">'+lit1(lit)+'</td><td class="mono r" style="font-weight:700">'+fmt(Math.round(cost))+'</td><td class="mono r" style="font-weight:700">'+(adv?fmt(Math.round(adv)):'—')+'</td><td class="mono r">'+(km>0&&cost>0?(cost/km).toFixed(2):'—')+'</td></tr>';
 }
 function kv(a,b){return '<div class="kv"><span>'+a+'</span><span style="font-weight:600">'+b+'</span></div>';}
 function renderRepairBox(){
@@ -1222,9 +1223,10 @@ function pull(extraMonth){
   var cur=ymd().slice(0,7), mm=[monthAdd(cur,-1),cur];
   Object.keys(LOADED).forEach(function(k){if(mm.indexOf(k)<0)mm.push(k);});
   if(extraMonth&&mm.indexOf(extraMonth)<0)mm.push(extraMonth);
-  PULLING=Promise.all([api('GET','/api/cars'),api('GET','/api/repairs')].concat(mm.map(function(m){return api('GET','/api/records?month='+m);})))
+  PULLING=Promise.all([api('GET','/api/cars'),api('GET','/api/repairs')].concat(mm.map(function(m){return api('GET','/api/records?month='+m);})).concat(mm.map(function(m){return api('GET','/api/advances?month='+m).catch(function(){return [];});})))
   .then(function(res){
-    var recs=[];res.slice(2).forEach(function(a){recs=recs.concat(a||[]);});
+    var recs=[],adv=[];res.slice(2,2+mm.length).forEach(function(a){recs=recs.concat(a||[]);});res.slice(2+mm.length).forEach(function(a){adv=adv.concat(a||[]);});
+    DB.advances=adv;
     mm.forEach(function(m){LOADED[m]=1;});
     if(!CARS_DIRTY)DB.cars=res[0]||[];
     DB.repairs=res[1]||[];DB.records=recs;
