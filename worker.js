@@ -503,7 +503,7 @@ async function fleetTable(env, origin, hiId, head) {
   let old0 = false;
   const H = (t, f, al) => cell(t, { flex: f, color: '#6B7280', size: 'xxs', align: al || 'start', wrap: true });
   const rows = [{ type: 'box', layout: 'horizontal', paddingAll: '6px', spacing: 'sm', backgroundColor: '#F3F4F6', cornerRadius: '6px', alignItems: 'center', contents: [
-    H('รถ', 2), H('คนขับ', 3), H('ไมล์ขาไป', 4, 'end'), H('ไมล์ขากลับ', 4, 'end'), H('ระยะทาง', 3, 'end'), H('น้ำมัน', 5, 'center'), H('สถานะรถ', 4, 'center'),
+    H('รถ / คนขับ', 5), H('ไมล์ขาไป', 4, 'end'), H('ไมล์ขากลับ', 4, 'end'), H('ระยะทาง', 3, 'end'), H('น้ำมัน', 5, 'center'), H('สถานะรถ', 4, 'center'),
   ] }];
   for (const c of cars) {
     const l = recs.filter((r) => r.carId === c.id).sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
@@ -533,8 +533,10 @@ async function fleetTable(env, origin, hiId, head) {
       ? st.map(([t, co]) => cell(t, { size: 'xxs', color: co, wrap: true, align: 'center', weight: 'bold' }))
       : [cell('ปกติ', { size: 'xxs', color: '#1F8A4C', align: 'center' })] };
     rows.push({ type: 'box', layout: 'horizontal', paddingAll: '6px', spacing: 'sm', cornerRadius: '6px', alignItems: 'center', backgroundColor: hi ? '#E7F5EC' : '#FFFFFF', contents: [
-      cell(String(c.plate || c.id), { flex: 2, weight: 'bold', size: 'sm' }),
-      cell(drv, { flex: 3, color: tc, wrap: false }),
+      { type: 'box', layout: 'vertical', flex: 5, contents: [
+        cell(String(c.plate || c.id), { weight: 'bold', size: 'sm' }),
+        cell(drv, { size: 'xxs', color: old ? '#9CA3AF' : '#4B5563', wrap: true }),
+      ] },
       cell(tOut ? nf(tOut.odo) : '—', { flex: 4, align: 'end', color: tOut ? tc : '#9CA3AF', weight: hi && !tIn ? 'bold' : 'regular' }),
       cell(tIn ? nf(tIn.odo) : '—', { flex: 4, align: 'end', color: tIn ? tc : '#9CA3AF', weight: hi && tIn ? 'bold' : 'regular' }),
       cell(dist, { flex: 3, align: 'end', color: dist === '—' ? '#9CA3AF' : tc }),
