@@ -11,6 +11,10 @@ directory = "./public"
 binding = "BUCKET"
 bucket_name = "cartaxi"
 
+# Workers AI ใช้อ่านเลขไมล์/น้ำมันจากรูปที่คนขับส่งในกลุ่ม LINE
+[ai]
+binding = "AI"
+
 # จำกัดเว็บที่เรียก API ได้ (ใส่โดเมนที่วางไฟล์ HTML เช่น "https://fleet.2psservices.com")
 # ปล่อย "*" ไว้ได้ถ้าเปิดไฟล์ HTML จากหลายที่
 [vars]

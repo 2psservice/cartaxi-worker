@@ -195,6 +195,207 @@ async function hmacOk(env, body, sig) {
   return b64 === sig;
 }
 
+/* ===================== บอทในกลุ่ม LINE: อ่านเลขไมล์/น้ำมันจากรูป =====================
+ * คนขับส่งรูปหน้าปัด + พิมพ์เบอร์รถ (เช่น "05คับ") ในกลุ่ม → ระบบอ่านรูปด้วย Workers AI
+ * บันทึกเป็นขาไป/ขากลับ แล้ว "ตอบกลับ" (reply ฟรี ไม่นับโควตา) เป็นการ์ด
+ * ต้องตั้ง Secret: LINE_TOKEN, LINE_SECRET และผูก Workers AI (binding "AI" ใน wrangler.toml)
+ */
+const VISION_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
+const PAIR_MS = 15 * 60 * 1000;      // จับคู่รูปกับเบอร์รถที่คนเดียวกันส่งภายใน 15 นาที
+const MAX_KM_DAY = 800;
+
+function bkkNow() { const d = new Date(Date.now() + 7 * 3600e3); return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) }; }
+function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+async function lineApi(env, path, body) {
+  return fetch('https://api.line.me' + path, {
+    method: body ? 'POST' : 'GET',
+    headers: { Authorization: 'Bearer ' + env.LINE_TOKEN, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+async function lineReply(env, token, messages) {
+  if (!token) return;
+  await lineApi(env, '/v2/bot/message/reply', { replyToken: token, messages: messages.slice(0, 5) });
+}
+function textMsg(t) { return { type: 'text', text: String(t).slice(0, 4900) }; }
+async function displayName(env, src) {
+  try {
+    const p = src.type === 'group' ? '/v2/bot/group/' + src.groupId + '/member/' + src.userId
+      : src.type === 'room' ? '/v2/bot/room/' + src.roomId + '/member/' + src.userId : '/v2/bot/profile/' + src.userId;
+    const r = await lineApi(env, p); if (!r.ok) return '';
+    const j = await r.json(); return String(j.displayName || '').trim();
+  } catch { return ''; }
+}
+
+/* เบอร์รถ = ตัวเลขชุดแรก (1–3 หลัก) ที่ตรงกับทะเบียนในรายการรถ · เลขไมล์ = ตัวเลข 4–7 หลักที่ตามมา (ถ้าพิมพ์มา) */
+function parseCarText(text, cars) {
+  const nums = String(text || '').replace(/,/g, '').match(/\d+/g) || [];
+  if (!nums.length) return null;
+  const want = parseInt(nums[0], 10);
+  if (nums[0].length > 3) return null;
+  const car = (cars || []).find((c) => {
+    const d = String(c.plate || '').replace(/\D/g, '');
+    return d && parseInt(d, 10) === want && String(c.plate).replace(/[\s\d]/g, '').length <= 3;
+  }) || (cars || []).find((c) => String(c.id) === nums[0]);
+  if (!car) return null;
+  const odoTxt = nums.slice(1).find((n) => n.length >= 4 && n.length <= 7);
+  return { car, odo: odoTxt ? parseInt(odoTxt, 10) : null };
+}
+
+async function carRecords(env, carId) {
+  const now = new Date(Date.now() + 7 * 3600e3);
+  const months = [now.toISOString().slice(0, 7)];
+  const prev = new Date(now); prev.setUTCDate(1); prev.setUTCMonth(prev.getUTCMonth() - 1); months.push(prev.toISOString().slice(0, 7));
+  const out = [];
+  for (const m of months) {
+    let cursor;
+    do {
+      const page = await env.BUCKET.list({ prefix: 'data/records/' + m + '/', cursor, limit: 1000 });
+      for (const o of page.objects) {
+        if (o.key.endsWith('_' + carId + '.json') || o.key.endsWith('_' + carId + '_in.json')) {
+          const r = await getJson(env, o.key, null); if (r && r.carId === carId) out.push(r);
+        }
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+  const ord = (r) => r.date + (r.trip === 'in' ? 'b' : 'a');
+  return out.sort((a, b) => (ord(a) < ord(b) ? -1 : ord(a) > ord(b) ? 1 : 0));
+}
+
+async function readDash(env, bytes) {
+  if (!env.AI) return { odo: null, fuel: null, err: 'ยังไม่ได้ผูก Workers AI' };
+  const prompt = 'This is a photo of a car instrument cluster. Read two things:\n' +
+    '1) the ODOMETER total distance in km (labelled ODO, or the long counter on an analog speedometer). Ignore TRIP meters, speed and time.\n' +
+    '2) the FUEL gauge level from E (0%) to F (100%), rounded to the nearest 10.\n' +
+    'Reply with ONLY compact JSON: {"odo":<integer or null>,"fuel":<integer 0-100 or null>,"sure":<true|false>}';
+  const input = { messages: [{ role: 'user', content: prompt }], image: [...bytes], max_tokens: 80, temperature: 0 };
+  let out;
+  try { out = await env.AI.run(VISION_MODEL, input); }
+  catch (e) {
+    if (/agree/i.test(String(e && e.message))) { await env.AI.run(VISION_MODEL, { prompt: 'agree' }); out = await env.AI.run(VISION_MODEL, input); }
+    else return { odo: null, fuel: null, err: String(e && e.message || e) };
+  }
+  const txt = String(out && (out.response ?? out.result ?? out) || '');
+  const m = txt.match(/\{[\s\S]*?\}/);
+  let j = {}; try { j = m ? JSON.parse(m[0]) : {}; } catch {}
+  const odo = Number.isFinite(Number(j.odo)) && Number(j.odo) > 0 ? Math.round(Number(j.odo)) : null;
+  let fuel = Number.isFinite(Number(j.fuel)) ? Math.round(Number(j.fuel) / 10) * 10 : null;
+  if (fuel != null) fuel = Math.max(0, Math.min(100, fuel));
+  return { odo, fuel, sure: j.sure !== false, raw: txt.slice(0, 200) };
+}
+
+async function savePhoto(env, bytes) {
+  if (!(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) return null;
+  const now = bkkNow();
+  const name = now.date.slice(0, 7) + '/' + (rid() + rid()).toLowerCase().replace(/[^a-z0-9]/g, '') + '.jpg';
+  await env.BUCKET.put('photos/' + name, bytes, { httpMetadata: { contentType: 'image/jpeg' } });
+  return name;
+}
+
+/* รวมรูป + เบอร์รถ แล้วบันทึก */
+async function tryComplete(env, pend, replyToken, origin) {
+  if (!pend.carId || !pend.photo) return false;
+  const cars = await getJson(env, 'data/cars.json', []);
+  const car = (cars || []).find((c) => c.id === pend.carId);
+  if (!car) return false;
+  const recs = await carRecords(env, car.id);
+  const now = bkkNow();
+  const todays = recs.filter((r) => r.date === now.date);
+  const trip = todays.some((r) => r.trip !== 'in') ? 'in' : 'out';
+  const prev = recs.filter((r) => (r.date + (r.trip === 'in' ? 'b' : 'a')) < (now.date + (trip === 'in' ? 'b' : 'a'))).pop() || null;
+  const odo = pend.typedOdo || pend.ocr.odo;
+  const plate = 'รถ ' + (car.plate || car.id);
+  const bad = !odo ? 'อ่านเลขไมล์จากรูปไม่ได้'
+    : prev && odo < prev.odo ? 'เลขไมล์ที่อ่านได้ ' + nf(odo) + ' น้อยกว่าครั้งก่อน (' + nf(prev.odo) + ')'
+    : prev && odo - prev.odo > MAX_KM_DAY ? 'เลขไมล์ที่อ่านได้ ' + nf(odo) + ' มากกว่าครั้งก่อนเกิน ' + MAX_KM_DAY + ' กม.'
+    : '';
+  if (bad && !pend.typedOdo) {
+    pend.waitOdo = true; await putJson(env, 'data/line/pending/' + pend.userId + '.json', pend);
+    await lineReply(env, replyToken, [textMsg('⚠️ ' + plate + ': ' + bad + '\nกรุณาพิมพ์เบอร์รถตามด้วยเลขไมล์ เช่น  ' + String(car.plate).replace(/\D/g, '') + ' ' + (prev ? prev.odo + 50 : 123456))]);
+    return true;
+  }
+  if (bad && pend.typedOdo && prev && odo < prev.odo) {
+    await lineReply(env, replyToken, [textMsg('⚠️ ' + plate + ': เลขไมล์ ' + nf(odo) + ' น้อยกว่าครั้งก่อน (' + nf(prev.odo) + ') ยังไม่บันทึก กรุณาตรวจแล้วพิมพ์ใหม่')]);
+    return true;
+  }
+  const fuel10 = pend.ocr.fuel == null ? null : Math.round(pend.ocr.fuel / 10);
+  const r = {
+    id: rid(), date: now.date, trip, time: now.time, carId: car.id, driver: pend.name || 'คนขับ',
+    odo, fuel: fuel10, fs: 10, km: prev ? odo - prev.odo : null, liters: null, cost: null,
+    photoOdo: pend.photo ? origin + '/photos/' + pend.photo : null, photoBill: null,
+    note: pend.typedOdo ? 'เลขไมล์พิมพ์ใน LINE' : 'อ่านจากรูปใน LINE อัตโนมัติ', route: '', src: 'line',
+  };
+  const key = 'data/records/' + now.date.slice(0, 7) + '/' + now.date + '_' + car.id + (trip === 'in' ? '_in' : '') + '.json';
+  await putJson(env, key, r);
+  await env.BUCKET.delete('data/line/pending/' + pend.userId + '.json');
+  const isIn = trip === 'in', fp = fuelPct(r);
+  const rows = [
+    row('👤', 'ผู้ขับ', r.driver),
+    row('🕒', 'เวลา', thDay(r.date) + ' · ' + r.time + ' น.'),
+    row('🚗', 'เลขไมล์', nf(r.odo) + ' กม.'),
+  ];
+  if (r.km != null) rows.push(row('📏', 'วิ่งจากครั้งก่อน', '+' + nf(r.km) + ' กม.', '#1F8A4C'));
+  rows.push(row('⛽', 'น้ำมัน', fp == null ? 'อ่านไม่ได้ (แก้ในแอป)' : fp + '%', fp != null && fp <= 25 ? '#C8372D' : null));
+  rows.push({ type: 'text', text: (pend.typedOdo ? 'เลขไมล์จากที่พิมพ์' : 'อ่านจากรูปอัตโนมัติ') + ' · ถ้าผิดกด "เปิดแอป" แล้วแก้ไขได้', size: 'xs', color: '#6B7280', wrap: true, margin: 'md' });
+  const title = (isIn ? '🔴 ขากลับ' : '🟢 ขาไป') + ' · ' + plate;
+  const bubble = card(isIn ? '#C8372D' : '#1F8A4C', 'FLEET DAILY CHECK · 2PS', title, rows, httpsUrl(r.photoOdo), origin + '/');
+  await lineReply(env, replyToken, [{ type: 'flex', altText: title + ' · ไมล์ ' + nf(r.odo) + ' · น้ำมัน ' + (fp == null ? '—' : fp + '%'), contents: bubble }]);
+  return true;
+}
+
+async function handleLineEvent(env, ev, origin) {
+  const src = ev.source || {};
+  if (src.type === 'group' && src.groupId) {
+    const cur = await getJson(env, 'data/line/target.json', null);
+    if (!cur || cur.id !== src.groupId) await putJson(env, 'data/line/target.json', { id: src.groupId, type: 'group', at: new Date().toISOString() });
+  }
+  if (ev.type !== 'message' || !src.userId || !env.LINE_TOKEN) return;
+  const msg = ev.message || {};
+  const pkey = 'data/line/pending/' + src.userId + '.json';
+  let pend = await getJson(env, pkey, null);
+  if (pend && Date.now() - pend.at > PAIR_MS) pend = null;
+
+  if (msg.type === 'image') {
+    const res = await fetch('https://api-data.line.me/v2/bot/message/' + msg.id + '/content', { headers: { Authorization: 'Bearer ' + env.LINE_TOKEN } });
+    if (!res.ok) return;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > 6 * 1024 * 1024) return;
+    const early = pend && !pend.photo ? pend : null;   // พิมพ์เบอร์รถมาก่อนรูป
+    await putJson(env, pkey, { userId: src.userId, name: (pend && pend.name) || '', at: Date.now(), processing: true, photo: null,
+      ocr: { odo: null, fuel: null }, carId: early ? early.carId : null, typedOdo: early ? early.typedOdo : null });
+    const [photo, ocr, name] = await Promise.all([savePhoto(env, bytes), readDash(env, bytes), displayName(env, src)]);
+    const latest = (await getJson(env, pkey, null)) || {};   // เบอร์รถที่พิมพ์ตามมาระหว่างอ่านรูป
+    pend = { userId: src.userId, name: name || latest.name || '', at: Date.now(), photo, ocr,
+      carId: latest.carId || null, typedOdo: latest.typedOdo || null };
+    await putJson(env, pkey, pend);
+    await tryComplete(env, pend, ev.replyToken, origin);
+    return;
+  }
+  if (msg.type === 'text') {
+    const cars = await getJson(env, 'data/cars.json', []);
+    const p = parseCarText(msg.text, cars);
+    if (!p) return;
+    if (pend && pend.processing) {   // รูปกำลังถูกอ่านอยู่ ฝากเบอร์รถไว้ ให้ฝั่งรูปบันทึกและตอบกลับ
+      pend.carId = p.car.id; if (p.odo) pend.typedOdo = p.odo;
+      await putJson(env, pkey, pend); return;
+    }
+    if (!pend) {
+      if (!p.odo) { await putJson(env, pkey, { userId: src.userId, name: await displayName(env, src), at: Date.now(), carId: p.car.id, typedOdo: null, photo: null, ocr: { odo: null, fuel: null } }); return; }
+      pend = { userId: src.userId, name: await displayName(env, src), at: Date.now(), photo: null, ocr: { odo: null, fuel: null } };
+    }
+    pend.carId = p.car.id; if (p.odo) pend.typedOdo = p.odo; pend.at = Date.now();
+    if (!pend.name) pend.name = await displayName(env, src);
+    await putJson(env, pkey, pend);
+    if (!pend.photo && p.odo) {
+      await lineReply(env, ev.replyToken, [textMsg('รับเลขไมล์ รถ ' + p.car.plate + ' = ' + nf(p.odo) + ' แล้ว กรุณาส่งรูปหน้าปัดตามมาด้วย')]);
+      return;
+    }
+    await tryComplete(env, pend, ev.replyToken, origin);
+  }
+}
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -218,12 +419,11 @@ export default {
       // ---------- LINE webhook: จำ groupId ของกลุ่มที่เชิญบอทเข้าไป ----------
       if (m === 'POST' && path === '/line/webhook') {
         const body = await req.text();
+        if (!env.LINE_SECRET) return json(env, { ok: true, note: 'ตั้ง LINE_SECRET ก่อน บอทจึงจะทำงาน' });
         if (!(await hmacOk(env, body, req.headers.get('x-line-signature') || ''))) return fail(env, 401, 'bad signature');
         let j = {}; try { j = JSON.parse(body); } catch {}
-        for (const ev of j.events || []) {
-          const src = ev.source || {};
-          if (src.type === 'group' && src.groupId) await putJson(env, 'data/line/target.json', { id: src.groupId, type: 'group', at: new Date().toISOString() });
-        }
+        const evs = (j.events || []).slice(0, 20);
+        ctx.waitUntil((async () => { for (const ev of evs) { try { await handleLineEvent(env, ev, url.origin); } catch (e) {} } })());
         return json(env, { ok: true });
       }
 
@@ -269,7 +469,7 @@ export default {
           // ทุกคนเปิดงานซ่อมและเปลี่ยนสถานะซ่อมได้ (ไม่ต้องใช้รหัสแอดมิน)
           const prevT = await getJson(env, key, null);
           await putJson(env, key, t);
-          if (!prevT && env.LINE_TOKEN) ctx.waitUntil(notifyRepair(env, t, origin).catch(() => {}));
+          if (!prevT && env.LINE_TOKEN && env.LINE_PUSH === 'true') ctx.waitUntil(notifyRepair(env, t, origin).catch(() => {}));
           return json(env, { ok: true });
         }
       }
@@ -295,7 +495,7 @@ export default {
           const rKey = 'data/records/' + date.slice(0, 7) + '/' + date + '_' + carId + (trip === 'in' ? '_in' : '') + '.json';
           const existed = !!(await env.BUCKET.head(rKey));
           await putJson(env, rKey, r);
-          if (env.LINE_TOKEN) ctx.waitUntil(notifyRecord(env, r, existed, origin).catch(() => {}));
+          if (env.LINE_TOKEN && env.LINE_PUSH === 'true') ctx.waitUntil(notifyRecord(env, r, existed, origin).catch(() => {}));
           return json(env, { ok: true });
         }
       }
