@@ -491,10 +491,9 @@ async function tryComplete(env, uid, replyToken, origin) {
 
   const isIn = trip === 'in', fp = fuelPct(r);
   const head = '✅ บันทึก' + (isIn ? 'ขากลับ' : 'ขาไป') + ' รถ ' + (car.plate || car.id) + ' · ' + r.driver + ' · ' + r.time + ' น.' + (bill ? ' · เติมน้ำมัน' : '');
-  const msgs = [await fleetTable(env, origin, car.id, head)];
+  // ตอบแค่ข้อความสั้น (ไม่ส่งตาราง) · ปุ่มแก้น้ำมัน 0–100% แนบเป็นปุ่มลัดใต้ช่องพิมพ์
   const qr = { items: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => ({ type: 'action', action: { type: 'message', label: v + '%', text: carNo + ' น้ำมัน ' + v + '%' } })) };
-  msgs.push({ type: 'text', text: fuelWarn ? '⛽ ' + fuelWarn + '\nกรุณาดูหน้าปัดแล้วแตะเลือกค่าที่ถูกด้านล่าง' : fp == null ? '⛽ อ่านระดับน้ำมันจากรูปไม่ได้ แตะเลือกด้านล่างได้เลย' : '⛽ ระดับน้ำมันไม่ตรง? แตะเลือกค่าที่ถูกด้านล่าง', quickReply: qr });
-  await lineReply(env, replyToken, msgs);
+  await lineReply(env, replyToken, [{ type: 'text', text: '✅ บันทึก' + (isIn ? 'ขากลับ' : 'ขาไป') + ' รถ ' + (car.plate || car.id) + ' เข้าระบบเรียบร้อย', quickReply: qr }]);
   return true;
 }
 
@@ -513,7 +512,7 @@ async function tryAdvance(env, uid, replyToken, origin) {
   const a = { id: rid(), date: now.date, time: now.time, carId: car.id, amount: slip.amount, by: adv.name || '', photo: slip.photo ? origin + '/photos/' + slip.photo : null, src: 'line' };
   await putJson(env, 'data/advances/' + now.date.slice(0, 7) + '/' + now.date + '_' + a.id + '.json', a);
   for (const k of u.keys) { const x = await getJson(env, k, null); if (k.endsWith('/adv.json') || (x && x.kind === 'slip' && x.photo === slip.photo)) await env.BUCKET.delete(k); }
-  await lineReply(env, replyToken, [await fleetTable(env, origin, car.id, '💸 บันทึกโอนค่าน้ำมัน รถ ' + car.plate + (a.amount ? ' · ' + nf(a.amount) + ' บาท' : ' (อ่านยอดเงินไม่ได้ แก้ในแอป)'))]);
+  await lineReply(env, replyToken, [textMsg('✅ บันทึกโอนค่าน้ำมัน รถ ' + car.plate + ' เข้าระบบเรียบร้อย')]);
   return true;
 }
 
@@ -708,7 +707,7 @@ async function tryNote(env, uid, replyToken, origin) {
   if (img) await env.BUCKET.delete(nk); else await putJson(env, nk, Object.assign(pn, { fresh: false }));
   const cars = await getJson(env, 'data/cars.json', []);
   const car = (cars || []).find((c) => c.id === rec.carId) || { plate: rec.carId };
-  await lineReply(env, replyToken, [await fleetTable(env, origin, rec.carId, '📝 เพิ่มหมายเหตุรถ ' + car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ')' + (img ? ' · 📎 แนบรูปแล้ว' : ''))]);
+  await lineReply(env, replyToken, [textMsg('✅ บันทึกหมายเหตุรถ ' + car.plate + ' เข้าระบบเรียบร้อย')]);
   return true;
 }
 
@@ -770,7 +769,7 @@ async function handleLineEvent(env, ev, origin) {
     if (!rec) { await lineReply(env, ev.replyToken, [textMsg('ยังไม่มีรายการวันนี้ของรถ ' + pc.car.plate + ' ส่งรูปหน้าปัด + เบอร์รถก่อนนะครับ')]); return; }
     rec.fuel = v / 10; rec.fs = 10;
     await putJson(env, key, rec);
-    await lineReply(env, ev.replyToken, [await fleetTable(env, origin, pc.car.id, '✅ แก้น้ำมันรถ ' + pc.car.plate + ' (' + (rec.trip === 'in' ? 'ขากลับ' : 'ขาไป') + ') เป็น ' + v + '%')]);
+    await lineReply(env, ev.replyToken, [textMsg('✅ บันทึกน้ำมันรถ ' + pc.car.plate + ' ' + v + '% เข้าระบบเรียบร้อย')]);
     return;
   }
   if (/ค่าน้ำมัน/.test(msg.text || '')) {   // "@พัน ค่าน้ำมันรถ 04 ครับ" + สลิปโอนเงิน = โอนค่าน้ำมันให้รถคันนั้น
